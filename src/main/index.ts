@@ -1,12 +1,13 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { IPC_CHANNELS } from '@shared/ipc'
-import { createMainWindow } from './windows'
+import { createMainWindow, createSplashWindow } from './windows'
 import { buildMenu } from './menu'
 import { registerFileIoHandlers } from './file-io'
 
 app.whenReady().then(() => {
   ipcMain.handle(IPC_CHANNELS.appGetVersion, () => app.getVersion())
 
+  createSplashWindow()
   const win = createMainWindow()
   buildMenu(win)
   registerFileIoHandlers(win)

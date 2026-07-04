@@ -1,6 +1,21 @@
-import { resolve } from 'node:path'
+import { copyFileSync, mkdirSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { defineConfig } from 'electron-vite'
 import type { Plugin } from 'vite'
+
+// windows.ts resolves the window icon as `<main out dir>/../icon.png` (i.e.
+// `out/icon.png`), mirroring the sibling products' convention of shipping
+// the icon at the output root next to main/preload/renderer.
+function copyIconPlugin(): Plugin {
+  return {
+    name: 'calco-copy-icon',
+    closeBundle() {
+      const dest = resolve('out/icon.png')
+      mkdirSync(dirname(dest), { recursive: true })
+      copyFileSync(resolve('build/icon.png'), dest)
+    }
+  }
+}
 
 function cspPlugin(): Plugin {
   return {
@@ -21,7 +36,8 @@ export default defineConfig({
       outDir: 'out/main',
       rollupOptions: { output: { format: 'cjs' } }
     },
-    resolve: { alias: { '@shared': resolve('src/shared') } }
+    resolve: { alias: { '@shared': resolve('src/shared') } },
+    plugins: [copyIconPlugin()]
   },
   preload: {
     build: {
@@ -32,7 +48,15 @@ export default defineConfig({
   },
   renderer: {
     root: 'src/renderer',
-    build: { outDir: 'out/renderer' },
+    build: {
+      outDir: 'out/renderer',
+      rollupOptions: {
+        input: {
+          index: resolve('src/renderer/index.html'),
+          splash: resolve('src/renderer/splash.html')
+        }
+      }
+    },
     resolve: { alias: { '@shared': resolve('src/shared') } },
     plugins: [cspPlugin()]
   }
