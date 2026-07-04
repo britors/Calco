@@ -1,0 +1,81 @@
+<svg width="600" height="600" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="pageGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbfbff"/>
+      <stop offset="55%" stop-color="#e9e9f4"/>
+      <stop offset="100%" stop-color="#cfd0e6"/>
+    </linearGradient>
+    <linearGradient id="pageCurl" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#bff0c8"/>
+      <stop offset="100%" stop-color="#2fae62"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#d7d8ea"/>
+      <stop offset="100%" stop-color="#b9bbd6"/>
+    </linearGradient>
+    <linearGradient id="barGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#dff0a8"/>
+      <stop offset="45%" stop-color="#7ed957"/>
+      <stop offset="100%" stop-color="#0f9b5c"/>
+    </linearGradient>
+    <linearGradient id="barShine" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="softShadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#4fbf67" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="600" height="600" fill="#0f1117"/>
+
+  <!-- Same glyph as the full logo, without the wordmark: recentered and
+       enlarged to read clearly at small taskbar/favicon sizes. -->
+  <g transform="translate(300,300) scale(1.42) translate(-334,-234)">
+    <g filter="url(#softShadow)">
+      <!-- Document / page, folded top-right corner -->
+      <path d="M198,112
+               Q198,98 212,98
+               L338,98
+               L382,142
+               L382,344
+               Q382,358 368,358
+               L212,358
+               Q198,358 198,344
+               Z"
+            fill="url(#pageGrad)"/>
+      <path d="M338,98 L382,142 L350,142 Q338,142 338,130 Z" fill="url(#fold)"/>
+
+      <!-- Peeling bottom-left corner revealing green underside -->
+      <path d="M198,300
+               C 214,330 214,344 198,358
+               L 236,358
+               C 244,336 244,318 226,300
+               Z"
+            fill="url(#pageCurl)"/>
+
+      <!-- Mini spreadsheet grid on the page -->
+      <g stroke="#9a9dc0" stroke-width="3" stroke-linecap="round">
+        <line x1="228" y1="168" x2="356" y2="168"/>
+        <line x1="228" y1="206" x2="356" y2="206"/>
+        <line x1="228" y1="244" x2="356" y2="244"/>
+        <line x1="228" y1="282" x2="356" y2="282"/>
+        <line x1="228" y1="168" x2="228" y2="320"/>
+        <line x1="271" y1="168" x2="271" y2="320"/>
+        <line x1="314" y1="168" x2="314" y2="320"/>
+        <line x1="356" y1="168" x2="356" y2="320"/>
+      </g>
+      <line x1="228" y1="320" x2="356" y2="320" stroke="#9a9dc0" stroke-width="3" stroke-linecap="round"/>
+
+      <!-- Ascending bar-chart, tilted, overlapping the page -->
+      <g transform="rotate(-14 400 300)">
+        <rect x="352" y="272" width="34" height="96" rx="10" fill="url(#barGrad)"/>
+        <rect x="394" y="226" width="34" height="142" rx="10" fill="url(#barGrad)"/>
+        <rect x="436" y="172" width="34" height="196" rx="10" fill="url(#barGrad)"/>
+        <rect x="352" y="272" width="10" height="96" rx="5" fill="url(#barShine)"/>
+        <rect x="394" y="226" width="10" height="142" rx="5" fill="url(#barShine)"/>
+        <rect x="436" y="172" width="10" height="196" rx="5" fill="url(#barShine)"/>
+      </g>
+    </g>
+  </g>
+</svg>
