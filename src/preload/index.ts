@@ -14,6 +14,10 @@ const api: CalcoAPI = {
     onMenuAction: (cb: (action: MenuAction) => void) => {
       ipcRenderer.on(IPC_CHANNELS.menuAction, (_event, action: MenuAction) => cb(action))
     }
+  },
+  clipboard: {
+    writeHtml: (html, text) => ipcRenderer.invoke(IPC_CHANNELS.clipboardWriteHtml, html, text),
+    readText: () => ipcRenderer.invoke(IPC_CHANNELS.clipboardReadText)
   }
 }
 

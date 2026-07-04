@@ -3,9 +3,11 @@ import { IPC_CHANNELS } from '@shared/ipc'
 import { createMainWindow, createSplashWindow } from './windows'
 import { buildMenu } from './menu'
 import { registerFileIoHandlers } from './file-io'
+import { registerClipboardHandlers } from './clipboard-io'
 
 app.whenReady().then(() => {
   ipcMain.handle(IPC_CHANNELS.appGetVersion, () => app.getVersion())
+  registerClipboardHandlers()
 
   createSplashWindow()
   const win = createMainWindow()

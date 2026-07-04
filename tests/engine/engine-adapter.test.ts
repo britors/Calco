@@ -153,4 +153,70 @@ describe('EngineAdapter', () => {
       expect(engine.getCellSnapshot(0, 0).value).toBe(5)
     })
   })
+
+  describe('clipboard', () => {
+    it('copies and pastes a range of literal values', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(0, 0, 1)
+      engine.setCellContent(0, 1, 2)
+
+      engine.copyRange({ minRow: 0, maxRow: 0, minCol: 0, maxCol: 1 })
+      engine.pasteAt(5, 5)
+
+      expect(engine.getCellSnapshot(5, 5).value).toBe(1)
+      expect(engine.getCellSnapshot(5, 6).value).toBe(2)
+      // Source is untouched by a copy (unlike a cut).
+      expect(engine.getCellSnapshot(0, 0).value).toBe(1)
+    })
+
+    it('adjusts relative references when pasting a copied formula', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(0, 0, 10)
+      engine.setCellContent(1, 0, 20)
+      engine.setCellContent(0, 1, '=A1*2') // references the cell directly to its left
+
+      engine.copyRange({ minRow: 0, maxRow: 0, minCol: 1, maxCol: 1 })
+      engine.pasteAt(1, 1) // one row down -- relative ref should now point at A2 (20)
+
+      expect(engine.getCellSnapshot(1, 1).raw).toBe('=A2*2')
+      expect(engine.getCellSnapshot(1, 1).value).toBe(40)
+    })
+
+    it('clears the source range after cut + paste', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(0, 0, 'x')
+
+      engine.cutRange({ minRow: 0, maxRow: 0, minCol: 0, maxCol: 0 })
+      engine.pasteAt(3, 3)
+
+      expect(engine.getCellSnapshot(3, 3).value).toBe('x')
+      expect(engine.getCellSnapshot(0, 0).value).toBeNull()
+    })
+
+    it('pasteExternalRows writes a block and coerces nothing itself (caller-parsed values)', () => {
+      const engine = new EngineAdapter()
+      engine.pasteExternalRows(2, 2, [
+        [1, 'two'],
+        [3, 'four']
+      ])
+      expect(engine.getCellSnapshot(2, 2).value).toBe(1)
+      expect(engine.getCellSnapshot(2, 3).value).toBe('two')
+      expect(engine.getCellSnapshot(3, 2).value).toBe(3)
+      expect(engine.getCellSnapshot(3, 3).value).toBe('four')
+    })
+
+    it('reports isClipboardEmpty/clearClipboard correctly, and pasteAt no-ops when empty', () => {
+      const engine = new EngineAdapter()
+      expect(engine.isClipboardEmpty()).toBe(true)
+      expect(engine.pasteAt(0, 0)).toEqual([])
+
+      engine.setCellContent(0, 0, 1)
+      engine.copyRange({ minRow: 0, maxRow: 0, minCol: 0, maxCol: 0 })
+      expect(engine.isClipboardEmpty()).toBe(false)
+
+      engine.clearClipboard()
+      expect(engine.isClipboardEmpty()).toBe(true)
+      expect(engine.pasteAt(1, 1)).toEqual([])
+    })
+  })
 })

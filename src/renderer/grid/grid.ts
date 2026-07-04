@@ -3,6 +3,7 @@ import type { GridMetrics, ScrollState } from './viewport'
 import { hitTest, hitTestColumnHeader, hitTestRowHeader } from './hit-test'
 import { Selection } from './selection'
 import { computeUsedRegion } from './used-region'
+import { buildHtmlTable, buildTsv, buildValuesMatrix, parseTsv } from './clipboard'
 import { render } from './render'
 import { EditorOverlay, type EditorCloseResult } from './editor-overlay'
 
@@ -54,6 +55,13 @@ export function mountGrid(container: HTMLElement, engine: EngineAdapter): Mounte
 
   const selection = new Selection(MAX_ROWS - 1, MAX_COLS - 1)
   const editor = new EditorOverlay(container, engine, METRICS, handleEditorClose)
+
+  // Text last written to the OS clipboard by *this* app -- lets paste tell an
+  // internal copy/cut apart from external data (e.g. copied from real Excel)
+  // without a fragile "was the last action ours" flag: if the OS clipboard
+  // still holds exactly what we wrote, it's safe to assume it's still ours.
+  let lastInternalClipboardText: string | null = null
+  let lastCopiedValues: (string | number | boolean)[][] | null = null
 
   let renderScheduled = false
   function scheduleRender(): void {
@@ -237,13 +245,72 @@ export function mountGrid(container: HTMLElement, engine: EngineAdapter): Mounte
     scheduleRender()
   }
 
+  async function handleCopy(): Promise<void> {
+    const range = selection.normalized
+    engine.copyRange(range)
+    lastCopiedValues = buildValuesMatrix(engine, range)
+    const tsv = buildTsv(engine, range)
+    lastInternalClipboardText = tsv
+    await window.calco.clipboard.writeHtml(buildHtmlTable(engine, range), tsv)
+  }
+
+  async function handleCut(): Promise<void> {
+    const range = selection.normalized
+    engine.cutRange(range)
+    lastCopiedValues = buildValuesMatrix(engine, range)
+    const tsv = buildTsv(engine, range)
+    lastInternalClipboardText = tsv
+    await window.calco.clipboard.writeHtml(buildHtmlTable(engine, range), tsv)
+  }
+
+  async function handlePaste(valuesOnly: boolean): Promise<void> {
+    const text = await window.calco.clipboard.readText()
+    const { row, col } = selection.activeCell
+    const isInternal = text === lastInternalClipboardText && !engine.isClipboardEmpty()
+
+    if (isInternal && !valuesOnly) {
+      engine.pasteAt(row, col)
+    } else if (isInternal && valuesOnly && lastCopiedValues) {
+      engine.pasteExternalRows(row, col, lastCopiedValues)
+    } else {
+      engine.pasteExternalRows(row, col, parseTsv(text))
+    }
+    ensureVisible(row, col)
+    scheduleRender()
+  }
+
+  function handleCancelClipboard(): void {
+    if (engine.isClipboardEmpty()) return
+    engine.clearClipboard()
+    lastInternalClipboardText = null
+    lastCopiedValues = null
+  }
+
   function handleKeydown(e: KeyboardEvent): void {
     if (editor.isEditing) return
 
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
-      e.preventDefault()
-      handleSelectAllKey()
-      return
+    if (e.ctrlKey || e.metaKey) {
+      const key = e.key.toLowerCase()
+      if (key === 'a') {
+        e.preventDefault()
+        handleSelectAllKey()
+        return
+      }
+      if (key === 'c') {
+        e.preventDefault()
+        void handleCopy()
+        return
+      }
+      if (key === 'x') {
+        e.preventDefault()
+        void handleCut()
+        return
+      }
+      if (key === 'v') {
+        e.preventDefault()
+        void handlePaste(e.shiftKey)
+        return
+      }
     }
 
     const { row, col } = selection.activeCell
@@ -279,6 +346,9 @@ export function mountGrid(container: HTMLElement, engine: EngineAdapter): Mounte
       case 'F2':
         e.preventDefault()
         openEditorAt(row, col, null)
+        return
+      case 'Escape':
+        handleCancelClipboard()
         return
       default:
         if (isPrintableKey(e)) openEditorAt(row, col, e.key)

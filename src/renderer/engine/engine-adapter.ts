@@ -7,12 +7,18 @@ export interface CellSnapshot {
   error?: string
 }
 
+export interface CellRangeBounds {
+  minRow: number
+  maxRow: number
+  minCol: number
+  maxCol: number
+}
+
 // Nominal grid capacity (spec section 4). Exported so renderer/grid/ can size
 // its scrollable area and clamp selection against the same numbers, without
 // depending on HyperFormula's lazily-grown internal sheet dimensions.
 export const MAX_ROWS = 100_000
 export const MAX_COLS = 1_000
-const GROWTH_CHUNK = 1_000
 
 export class EngineAdapter {
   private hf: HyperFormula
@@ -40,20 +46,6 @@ export class EngineAdapter {
     })
   }
 
-  private ensureDimensions(sheetId: number, row: number, col: number): void {
-    const dims = this.hf.getSheetDimensions(sheetId)
-    if (row >= dims.height) {
-      const target = Math.min(MAX_ROWS, Math.max(row + 1, dims.height + GROWTH_CHUNK))
-      const need = target - dims.height
-      if (need > 0) this.hf.addRows(sheetId, [dims.height, need])
-    }
-    if (col >= dims.width) {
-      const target = Math.min(MAX_COLS, Math.max(col + 1, dims.width + GROWTH_CHUNK))
-      const need = target - dims.width
-      if (need > 0) this.hf.addColumns(sheetId, [dims.width, need])
-    }
-  }
-
   addSheet(name?: string): number {
     const sheetName = this.hf.addSheet(name)
     const sheetId = this.hf.getSheetId(sheetName)
@@ -61,17 +53,18 @@ export class EngineAdapter {
     return sheetId
   }
 
+  // `setCellContents` grows the sheet's dimensions on its own, exactly to fit
+  // whatever's written, up to `maxRows`/`maxColumns` -- no manual pre-growth
+  // needed here. (An earlier manual grow-then-write approach here mirrored a
+  // real limitation of `addRows`/`addColumns` in isolation -- those *do*
+  // no-op on a still-empty sheet -- but calling them proactively as a
+  // structural CRUD op has a side effect of invalidating HyperFormula's
+  // clipboard, which is what broke `pasteAt` below before this was removed.)
   setCellContent(row: number, col: number, raw: string | number | boolean): CellSnapshot[] {
     // An empty string must clear the cell (HyperFormula's Empty content),
     // not be stored as a literal empty-string value.
     const content = raw === '' ? null : raw
-    // Batched so dimension growth + the content write land as a single
-    // undo-stack entry (spec section 6: "agrupamento de ações compostas") --
-    // otherwise one edit near the sheet's edge could take 2-3 Ctrl+Z presses.
-    const changes = this.hf.batch(() => {
-      this.ensureDimensions(this.activeSheetId, row, col)
-      this.hf.setCellContents({ sheet: this.activeSheetId, row, col }, [[content]])
-    })
+    const changes = this.hf.setCellContents({ sheet: this.activeSheetId, row, col }, [[content]])
     return changes
       .filter((change): change is ExportedCellChange => change instanceof ExportedCellChange)
       .map((change) => this.getCellSnapshot(change.row, change.col))
@@ -121,12 +114,14 @@ export class EngineAdapter {
     const sheetsToLoad = doc.sheets.length > 0 ? doc.sheets : [{ name: 'Sheet1', cells: [] }]
     const sheetIds: number[] = []
 
+    // Batched purely for recalculation performance across many cells (deferred
+    // until the whole load completes) -- undo-grouping doesn't matter here
+    // since clearUndoStack() below makes the load a non-event either way.
     this.hf.batch(() => {
       for (const sheet of sheetsToLoad) {
         const sheetId = this.addSheet(sheet.name)
         sheetIds.push(sheetId)
         for (const cell of sheet.cells) {
-          this.ensureDimensions(sheetId, cell.row, cell.col)
           this.hf.setCellContents({ sheet: sheetId, row: cell.row, col: cell.col }, [[cell.content]])
         }
       }
@@ -162,5 +157,49 @@ export class EngineAdapter {
       .redo()
       .filter((change): change is ExportedCellChange => change instanceof ExportedCellChange)
       .map((change) => this.getCellSnapshot(change.row, change.col))
+  }
+
+  copyRange(range: CellRangeBounds): void {
+    this.hf.copy(this.toSimpleCellRange(range))
+  }
+
+  cutRange(range: CellRangeBounds): void {
+    this.hf.cut(this.toSimpleCellRange(range))
+  }
+
+  isClipboardEmpty(): boolean {
+    return this.hf.isClipboardEmpty()
+  }
+
+  clearClipboard(): void {
+    this.hf.clearClipboard()
+  }
+
+  /** No-op (rather than throwing) when the clipboard is empty. `paste` grows the sheet on its own. */
+  pasteAt(row: number, col: number): CellSnapshot[] {
+    if (this.hf.isClipboardEmpty()) return []
+    const changes = this.hf.paste({ sheet: this.activeSheetId, row, col })
+    return changes
+      .filter((change): change is ExportedCellChange => change instanceof ExportedCellChange)
+      .map((change) => this.getCellSnapshot(change.row, change.col))
+  }
+
+  /** Writes a parsed-TSV block (external paste) starting at (row, col). */
+  pasteExternalRows(row: number, col: number, rows: (string | number | boolean)[][]): void {
+    this.hf.batch(() => {
+      rows.forEach((rowValues, rOffset) => {
+        rowValues.forEach((value, cOffset) => {
+          const content = value === '' ? null : value
+          this.hf.setCellContents({ sheet: this.activeSheetId, row: row + rOffset, col: col + cOffset }, [[content]])
+        })
+      })
+    })
+  }
+
+  private toSimpleCellRange(range: CellRangeBounds) {
+    return {
+      start: { sheet: this.activeSheetId, row: range.minRow, col: range.minCol },
+      end: { sheet: this.activeSheetId, row: range.maxRow, col: range.maxCol }
+    }
   }
 }

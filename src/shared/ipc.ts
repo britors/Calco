@@ -43,6 +43,12 @@ export interface CalcoAPI {
     getVersion(): Promise<string>
     onMenuAction(cb: (action: MenuAction) => void): void
   }
+  clipboard: {
+    // Writes both formats in one shot, matching Excel/Sheets' own dual-format
+    // clipboard convention (text/html for rich targets, text/plain fallback).
+    writeHtml(html: string, text: string): Promise<void>
+    readText(): Promise<string>
+  }
 }
 
 export const IPC_CHANNELS = {
@@ -52,5 +58,7 @@ export const IPC_CHANNELS = {
   fileExport: 'file:export',
   fileGetRecent: 'file:get-recent',
   appGetVersion: 'app:get-version',
-  menuAction: 'menu:action'
+  menuAction: 'menu:action',
+  clipboardWriteHtml: 'clipboard:write-html',
+  clipboardReadText: 'clipboard:read-text'
 } as const
