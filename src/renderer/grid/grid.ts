@@ -20,8 +20,13 @@ export interface MountedGrid {
   destroy(): void
 }
 
+export interface MountGridOptions {
+  /** Fires on every render -- a superset of "the active cell or its content may have changed" (also fires on pure scroll/resize), which is simpler and more robust than instrumenting every individual selection-mutating call site. */
+  onActiveCellChange?: (row: number, col: number) => void
+}
+
 /** Mounts an isolated canvas spreadsheet grid into `container`, backed by `engine`. */
-export function mountGrid(container: HTMLElement, engine: EngineAdapter): MountedGrid {
+export function mountGrid(container: HTMLElement, engine: EngineAdapter, options: MountGridOptions = {}): MountedGrid {
   // Only impose a positioning context if the caller hasn't already given the
   // container one (e.g. `position: absolute; inset: 0` to fill a parent) --
   // overwriting it unconditionally would collapse a caller-sized container.
@@ -104,6 +109,7 @@ export function mountGrid(container: HTMLElement, engine: EngineAdapter): Mounte
       maxRow: MAX_ROWS - 1,
       maxCol: MAX_COLS - 1
     })
+    options.onActiveCellChange?.(selection.activeCell.row, selection.activeCell.col)
   }
 
   function ensureVisible(row: number, col: number): void {

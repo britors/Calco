@@ -14,6 +14,11 @@ export interface CellRangeBounds {
   maxCol: number
 }
 
+export interface SheetInfo {
+  id: number
+  name: string
+}
+
 // Nominal grid capacity (spec section 4). Exported so renderer/grid/ can size
 // its scrollable area and clamp selection against the same numbers, without
 // depending on HyperFormula's lazily-grown internal sheet dimensions.
@@ -51,6 +56,39 @@ export class EngineAdapter {
     const sheetId = this.hf.getSheetId(sheetName)
     if (sheetId === undefined) throw new Error(`Failed to create sheet ${sheetName}`)
     return sheetId
+  }
+
+  listSheets(): SheetInfo[] {
+    return this.hf.getSheetNames().map((name) => {
+      const id = this.hf.getSheetId(name)
+      if (id === undefined) throw new Error(`Sheet ${name} has no id`)
+      return { id, name }
+    })
+  }
+
+  getActiveSheetId(): number {
+    return this.activeSheetId
+  }
+
+  setActiveSheetId(id: number): void {
+    this.activeSheetId = id
+  }
+
+  /** May throw (e.g. SheetNameAlreadyTakenError) -- caller decides how to handle it. */
+  renameSheet(id: number, name: string): void {
+    this.hf.renameSheet(id, name)
+  }
+
+  /** No-ops rather than ever leaving the app with zero sheets. */
+  removeSheet(id: number): void {
+    if (this.hf.getSheetNames().length <= 1) return
+    this.hf.removeSheet(id)
+    if (this.activeSheetId === id) {
+      const fallbackName = this.hf.getSheetNames()[0]
+      const fallbackId = this.hf.getSheetId(fallbackName)
+      if (fallbackId === undefined) throw new Error('No sheets remain after removal')
+      this.activeSheetId = fallbackId
+    }
   }
 
   // `setCellContents` grows the sheet's dimensions on its own, exactly to fit

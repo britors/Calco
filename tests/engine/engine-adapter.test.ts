@@ -219,4 +219,55 @@ describe('EngineAdapter', () => {
       expect(engine.pasteAt(1, 1)).toEqual([])
     })
   })
+
+  describe('sheet management', () => {
+    it('lists sheets and reflects add/rename', () => {
+      const engine = new EngineAdapter()
+      expect(engine.listSheets().map((s) => s.name)).toEqual(['Sheet1'])
+
+      const secondId = engine.addSheet()
+      expect(engine.listSheets().map((s) => s.name)).toEqual(['Sheet1', 'Sheet2'])
+
+      engine.renameSheet(secondId, 'Report')
+      expect(engine.listSheets().map((s) => s.name)).toEqual(['Sheet1', 'Report'])
+    })
+
+    it('setActiveSheetId changes which sheet setCellContent/getCellSnapshot target', () => {
+      const engine = new EngineAdapter()
+      const firstId = engine.getActiveSheetId()
+      const secondId = engine.addSheet('Sheet2')
+
+      engine.setActiveSheetId(firstId)
+      engine.setCellContent(0, 0, 'on sheet 1')
+
+      engine.setActiveSheetId(secondId)
+      engine.setCellContent(0, 0, 'on sheet 2')
+      expect(engine.getCellSnapshot(0, 0).value).toBe('on sheet 2')
+
+      engine.setActiveSheetId(firstId)
+      expect(engine.getCellSnapshot(0, 0).value).toBe('on sheet 1')
+    })
+
+    it('removeSheet reassigns activeSheetId when the active sheet is removed', () => {
+      const engine = new EngineAdapter()
+      const firstId = engine.getActiveSheetId()
+      const secondId = engine.addSheet('Sheet2')
+
+      engine.setActiveSheetId(secondId)
+      engine.removeSheet(secondId)
+
+      expect(engine.listSheets().map((s) => s.id)).toEqual([firstId])
+      expect(engine.getActiveSheetId()).toBe(firstId)
+    })
+
+    it('removeSheet no-ops rather than reaching zero sheets', () => {
+      const engine = new EngineAdapter()
+      const onlyId = engine.getActiveSheetId()
+
+      engine.removeSheet(onlyId)
+
+      expect(engine.listSheets()).toHaveLength(1)
+      expect(engine.getActiveSheetId()).toBe(onlyId)
+    })
+  })
 })
