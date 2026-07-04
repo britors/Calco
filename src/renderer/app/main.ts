@@ -1,8 +1,10 @@
 import { EngineAdapter } from '../engine/engine-adapter'
 import { mountGrid, type MountedGrid } from '../grid/grid'
 import { columnLabel } from '../grid/render'
+import { findMatches, replaceAll, replaceInCell, type CellMatch } from '../grid/find-replace'
 import { mountFormulaBar, type FormulaBar } from './formula-bar'
 import { mountSheetTabs, type SheetTabsBar } from './sheet-tabs'
+import { mountFindReplaceBar, type FindReplaceBar } from './find-replace-bar'
 import { packCalcoFile, unpackCalcoFile } from '../formats/calco-format'
 import type { CalcoAPI, MenuAction } from '@shared/ipc'
 import type { SerializedWorkbook } from '@shared/model'
@@ -86,6 +88,79 @@ function mountGridWithHandlers(): MountedGrid {
 
 grid = mountGridWithHandlers()
 refreshSheetTabs()
+
+let matches: CellMatch[] = []
+let matchIndex = -1
+
+function updateStatus(): void {
+  findReplaceBar.setStatus(matches.length === 0 ? '0/0' : `${matchIndex + 1}/${matches.length}`)
+}
+
+function jumpToCurrentMatch(): void {
+  if (matchIndex >= 0) {
+    const match = matches[matchIndex]
+    grid.selectCell(match.row, match.col)
+  }
+}
+
+function recomputeMatches(query: string): void {
+  matches = findMatches(engine, query)
+  matchIndex = matches.length > 0 ? 0 : -1
+  jumpToCurrentMatch()
+  updateStatus()
+}
+
+/** After a replace, the edited cell usually drops out of the match list -- keeping
+ *  the same numeric index (clamped) in the freshly recomputed list naturally lands
+ *  on what was the *next* match, giving an "advance after replace" feel for free. */
+function recomputeMatchesKeepingIndex(query: string): void {
+  matches = findMatches(engine, query)
+  if (matches.length === 0) matchIndex = -1
+  else if (matchIndex >= matches.length) matchIndex = 0
+  jumpToCurrentMatch()
+  updateStatus()
+}
+
+const findReplaceBar: FindReplaceBar = mountFindReplaceBar(gridRegion, {
+  onQueryChange: (query) => recomputeMatches(query),
+  onNext: () => {
+    if (matches.length === 0) return
+    matchIndex = (matchIndex + 1) % matches.length
+    jumpToCurrentMatch()
+    updateStatus()
+  },
+  onPrevious: () => {
+    if (matches.length === 0) return
+    matchIndex = (matchIndex - 1 + matches.length) % matches.length
+    jumpToCurrentMatch()
+    updateStatus()
+  },
+  onReplace: (query, replacement) => {
+    if (matchIndex < 0) return
+    const match = matches[matchIndex]
+    replaceInCell(engine, match.row, match.col, query, replacement)
+    grid.refresh()
+    recomputeMatchesKeepingIndex(query)
+  },
+  onReplaceAll: (query, replacement) => {
+    const count = replaceAll(engine, query, replacement)
+    grid.refresh()
+    recomputeMatches(query)
+    findReplaceBar.setStatus(`${count} substituídas`)
+  }
+})
+
+window.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return
+  const key = e.key.toLowerCase()
+  if (key === 'f') {
+    e.preventDefault()
+    findReplaceBar.show(false)
+  } else if (key === 'h') {
+    e.preventDefault()
+    findReplaceBar.show(true)
+  }
+})
 
 window.calco.app.getVersion().then((version) => {
   appVersion = version

@@ -17,6 +17,8 @@ const METRICS: GridMetrics = {
 export interface MountedGrid {
   /** Forces a redraw -- for callers that mutate the engine outside the grid's own edit flow (e.g. undo/redo). */
   refresh(): void
+  /** Selects and scrolls to (row, col) -- same effect as clicking that cell (e.g. jumping to a find-match). */
+  selectCell(row: number, col: number): void
   destroy(): void
 }
 
@@ -389,6 +391,11 @@ export function mountGrid(container: HTMLElement, engine: EngineAdapter, options
 
   return {
     refresh(): void {
+      scheduleRender()
+    },
+    selectCell(row: number, col: number): void {
+      selection.moveTo(row, col)
+      ensureVisible(row, col)
       scheduleRender()
     },
     destroy(): void {
