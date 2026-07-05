@@ -178,4 +178,88 @@ export class StyleStore {
     )
     return found
   }
+
+  private shiftStyleKeys(sheetId: number, axis: 'row' | 'col', map: (index: number) => number | null): void {
+    const existing = this.stylesBySheet.get(sheetId)
+    if (!existing) return
+    const shifted = new Map<string, CellStyle>()
+    for (const [k, style] of existing) {
+      const [row, col] = k.split(',').map(Number)
+      const mapped = map(axis === 'row' ? row : col)
+      if (mapped === null) continue // the cell's row/col was deleted
+      shifted.set(axis === 'row' ? key(mapped, col) : key(row, mapped), style)
+    }
+    this.stylesBySheet.set(sheetId, shifted)
+  }
+
+  private shiftMergesForInsert(sheetId: number, axis: 'row' | 'col', at: number, count: number): void {
+    const map = (index: number): number => (index >= at ? index + count : index)
+    const next: SerializedMerge[] = []
+    for (const m of this.mergesFor(sheetId)) {
+      next.push({
+        minRow: axis === 'row' ? map(m.minRow) : m.minRow,
+        maxRow: axis === 'row' ? map(m.maxRow) : m.maxRow,
+        minCol: axis === 'col' ? map(m.minCol) : m.minCol,
+        maxCol: axis === 'col' ? map(m.maxCol) : m.maxCol
+      })
+    }
+    this.mergesBySheet.set(sheetId, next)
+  }
+
+  private shiftMergesForDelete(sheetId: number, axis: 'row' | 'col', at: number, count: number): void {
+    // An edge that falls inside the deleted range clamps to `at` (the merge
+    // shrinks to the boundary) *unless the whole span on this axis* was
+    // inside the deleted range, in which case the merge can't survive at all
+    // -- clamping both edges independently would otherwise "resurrect" it as
+    // a bogus 1-wide range at `at`.
+    const clamp = (index: number): number => (index < at ? index : Math.max(at, index - count))
+    const next: SerializedMerge[] = []
+    for (const m of this.mergesFor(sheetId)) {
+      const origMin = axis === 'row' ? m.minRow : m.minCol
+      const origMax = axis === 'row' ? m.maxRow : m.maxCol
+      if (origMin >= at && origMax < at + count) continue // wholly swallowed by the deletion
+
+      const minRow = axis === 'row' ? clamp(m.minRow) : m.minRow
+      const maxRow = axis === 'row' ? clamp(m.maxRow) : m.maxRow
+      const minCol = axis === 'col' ? clamp(m.minCol) : m.minCol
+      const maxCol = axis === 'col' ? clamp(m.maxCol) : m.maxCol
+      if (minRow === maxRow && minCol === maxCol) continue // collapsed to a single cell -- not a merge anymore
+      next.push({ minRow, minCol, maxRow, maxCol })
+    }
+    this.mergesBySheet.set(sheetId, next)
+  }
+
+  /** Shifts style entries and merge bounds to make room for `count` new rows/cols inserted above/before `at`. */
+  private insertAxis(sheetId: number, axis: 'row' | 'col', at: number, count: number): void {
+    const map = (index: number): number => (index >= at ? index + count : index)
+    this.shiftStyleKeys(sheetId, axis, map)
+    this.shiftMergesForInsert(sheetId, axis, at, count)
+  }
+
+  /** Shifts style entries and merge bounds after removing `count` rows/cols starting at `at`. */
+  private deleteAxis(sheetId: number, axis: 'row' | 'col', at: number, count: number): void {
+    const mapForStyles = (index: number): number | null => {
+      if (index < at) return index
+      if (index < at + count) return null // this row/col was deleted
+      return index - count
+    }
+    this.shiftStyleKeys(sheetId, axis, mapForStyles)
+    this.shiftMergesForDelete(sheetId, axis, at, count)
+  }
+
+  insertRows(sheetId: number, at: number, count: number): void {
+    this.insertAxis(sheetId, 'row', at, count)
+  }
+
+  deleteRows(sheetId: number, at: number, count: number): void {
+    this.deleteAxis(sheetId, 'row', at, count)
+  }
+
+  insertCols(sheetId: number, at: number, count: number): void {
+    this.insertAxis(sheetId, 'col', at, count)
+  }
+
+  deleteCols(sheetId: number, at: number, count: number): void {
+    this.deleteAxis(sheetId, 'col', at, count)
+  }
 }

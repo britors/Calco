@@ -100,11 +100,13 @@ export class DimensionsStore {
     return Array.from(map, ([col, width]) => ({ col, width }))
   }
 
+  /** Unconditionally replaces both maps for `sheetId` -- including with empty
+   *  ones, which matters when this is used to restore an undo/redo snapshot
+   *  back to "no overrides" (a fresh sheet load never has stale data to
+   *  clear, but a restore might). */
   loadSheet(sheetId: number, rowHeights: SerializedRowHeight[], colWidths: SerializedColWidth[]): void {
-    const rowMap = new Map(rowHeights.map(({ row, height }) => [row, height]))
-    const colMap = new Map(colWidths.map(({ col, width }) => [col, width]))
-    if (rowMap.size > 0) this.rowHeightsBySheet.set(sheetId, rowMap)
-    if (colMap.size > 0) this.colWidthsBySheet.set(sheetId, colMap)
+    this.rowHeightsBySheet.set(sheetId, new Map(rowHeights.map(({ row, height }) => [row, height])))
+    this.colWidthsBySheet.set(sheetId, new Map(colWidths.map(({ col, width }) => [col, width])))
   }
 
   /** Highest row/col index that has an explicit override on this sheet, or -1 if none. */
@@ -116,5 +118,40 @@ export class DimensionsStore {
   maxOverriddenCol(sheetId: number): number {
     const map = this.colWidthsBySheet.get(sheetId)
     return map && map.size > 0 ? Math.max(...map.keys()) : -1
+  }
+
+  private shiftMap(bySheet: Map<number, Map<number, number>>, sheetId: number, map: (index: number) => number | null): void {
+    const existing = bySheet.get(sheetId)
+    if (!existing) return
+    const shifted = new Map<number, number>()
+    for (const [index, size] of existing) {
+      const mapped = map(index)
+      if (mapped !== null) shifted.set(mapped, size)
+    }
+    bySheet.set(sheetId, shifted)
+  }
+
+  insertRows(sheetId: number, at: number, count: number): void {
+    this.shiftMap(this.rowHeightsBySheet, sheetId, (index) => (index >= at ? index + count : index))
+  }
+
+  deleteRows(sheetId: number, at: number, count: number): void {
+    this.shiftMap(this.rowHeightsBySheet, sheetId, (index) => {
+      if (index < at) return index
+      if (index < at + count) return null
+      return index - count
+    })
+  }
+
+  insertCols(sheetId: number, at: number, count: number): void {
+    this.shiftMap(this.colWidthsBySheet, sheetId, (index) => (index >= at ? index + count : index))
+  }
+
+  deleteCols(sheetId: number, at: number, count: number): void {
+    this.shiftMap(this.colWidthsBySheet, sheetId, (index) => {
+      if (index < at) return index
+      if (index < at + count) return null
+      return index - count
+    })
   }
 }

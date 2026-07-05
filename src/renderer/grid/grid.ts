@@ -67,9 +67,22 @@ export function mountGrid(container: HTMLElement, engine: EngineAdapter, options
   resizeLine.style.zIndex = '5'
   resizeLine.style.pointerEvents = 'none'
 
+  const contextMenu = document.createElement('div')
+  contextMenu.style.position = 'fixed'
+  contextMenu.style.display = 'none'
+  contextMenu.style.zIndex = '50'
+  contextMenu.style.background = '#ffffff'
+  contextMenu.style.border = '1px solid #dcdfe3'
+  contextMenu.style.borderRadius = '4px'
+  contextMenu.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.2)'
+  contextMenu.style.font = '13px sans-serif'
+  contextMenu.style.padding = '4px 0'
+  contextMenu.style.minWidth = '190px'
+
   container.appendChild(scroller)
   container.appendChild(canvas)
   container.appendChild(resizeLine)
+  container.appendChild(contextMenu)
 
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('2D canvas context unavailable')
@@ -293,6 +306,79 @@ export function mountGrid(container: HTMLElement, engine: EngineAdapter, options
     rebuildSizers()
     updateSizerDivSize()
     scheduleRender()
+  }
+
+  // --- Row/column header context menu (insert/delete a single row or column) ---
+  function hideContextMenu(): void {
+    contextMenu.style.display = 'none'
+  }
+
+  interface ContextMenuItem {
+    label: string
+    onClick: () => void
+  }
+
+  function showContextMenu(clientX: number, clientY: number, items: ContextMenuItem[]): void {
+    contextMenu.innerHTML = ''
+    for (const item of items) {
+      const entry = document.createElement('div')
+      entry.textContent = item.label
+      entry.style.padding = '6px 16px'
+      entry.style.cursor = 'pointer'
+      entry.style.whiteSpace = 'nowrap'
+      entry.style.color = '#1a1a1a'
+      entry.addEventListener('mouseenter', () => {
+        entry.style.background = '#f0f4ff'
+      })
+      entry.addEventListener('mouseleave', () => {
+        entry.style.background = 'transparent'
+      })
+      entry.addEventListener('click', () => {
+        hideContextMenu()
+        item.onClick()
+      })
+      contextMenu.appendChild(entry)
+    }
+    contextMenu.style.left = `${clientX}px`
+    contextMenu.style.top = `${clientY}px`
+    contextMenu.style.display = 'block'
+  }
+
+  /** Runs a structural change (insert/delete row/col) and refreshes everything it can affect. */
+  function runStructureChange(fn: () => void): void {
+    fn()
+    rebuildSizers()
+    updateSizerDivSize()
+    scheduleRender()
+  }
+
+  function handleContextMenu(e: MouseEvent): void {
+    e.preventDefault()
+    const rect = canvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    const scroll = currentScroll()
+
+    const colHit = hitTestColumnHeader(x, y, metrics, scroll)
+    if (colHit !== null) {
+      showContextMenu(e.clientX, e.clientY, [
+        { label: 'Inserir coluna à esquerda', onClick: () => runStructureChange(() => engine.insertCols(colHit, 1)) },
+        { label: 'Excluir coluna', onClick: () => runStructureChange(() => engine.deleteCols(colHit, 1)) }
+      ])
+      return
+    }
+
+    const rowHit = hitTestRowHeader(x, y, metrics, scroll)
+    if (rowHit !== null) {
+      showContextMenu(e.clientX, e.clientY, [
+        { label: 'Inserir linha acima', onClick: () => runStructureChange(() => engine.insertRows(rowHit, 1)) },
+        { label: 'Excluir linha', onClick: () => runStructureChange(() => engine.deleteRows(rowHit, 1)) }
+      ])
+    }
+  }
+
+  function handleDocumentMousedownForMenu(e: MouseEvent): void {
+    if (!contextMenu.contains(e.target as Node)) hideContextMenu()
   }
 
   function handleCanvasHoverMove(e: MouseEvent): void {
@@ -567,6 +653,8 @@ export function mountGrid(container: HTMLElement, engine: EngineAdapter, options
   canvas.addEventListener('mousemove', handleCanvasHoverMove)
   canvas.addEventListener('dblclick', handleDoubleClick)
   canvas.addEventListener('wheel', handleWheel, { passive: false })
+  canvas.addEventListener('contextmenu', handleContextMenu)
+  document.addEventListener('mousedown', handleDocumentMousedownForMenu)
   container.addEventListener('keydown', handleKeydown)
 
   resizeCanvasToContainer()
@@ -593,6 +681,8 @@ export function mountGrid(container: HTMLElement, engine: EngineAdapter, options
       canvas.removeEventListener('mousemove', handleCanvasHoverMove)
       canvas.removeEventListener('dblclick', handleDoubleClick)
       canvas.removeEventListener('wheel', handleWheel)
+      canvas.removeEventListener('contextmenu', handleContextMenu)
+      document.removeEventListener('mousedown', handleDocumentMousedownForMenu)
       container.removeEventListener('keydown', handleKeydown)
       window.removeEventListener('mousemove', handleWindowMouseMove)
       window.removeEventListener('mouseup', handleWindowMouseUp)
@@ -602,6 +692,7 @@ export function mountGrid(container: HTMLElement, engine: EngineAdapter, options
       scroller.remove()
       canvas.remove()
       resizeLine.remove()
+      contextMenu.remove()
     }
   }
 }

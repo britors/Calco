@@ -1,5 +1,12 @@
 import { HyperFormula, DetailedCellError, ExportedCellChange } from 'hyperformula'
-import type { CellStyle, SerializedCell, SerializedMerge, SerializedWorkbook } from '@shared/model'
+import type {
+  CellStyle,
+  SerializedCell,
+  SerializedColWidth,
+  SerializedMerge,
+  SerializedRowHeight,
+  SerializedWorkbook
+} from '@shared/model'
 import { LOCALE_CODE, ensureLocaleRegistered, toCanonicalFormula, toDisplayFormula } from './formula-locale'
 import { StyleStore, type CellPos, type StyleSnapshotEntry } from './style-store'
 import { DimensionsStore } from './dimensions-store'
@@ -62,7 +69,27 @@ interface DimensionUndoMarker {
   before: number | undefined
   after: number
 }
-type UndoMarker = ContentUndoMarker | StyleUndoMarker | MergeUndoMarker | DimensionUndoMarker
+// Inserting/deleting rows or columns shifts cell content (which hf.undo/redo
+// already tracks precisely, formula references and all) *and* shifts every
+// style/merge/dimension entry on the sheet, which hf knows nothing about.
+// Rather than compute a precise incremental diff for the latter, a
+// 'structure' marker just snapshots the whole auxiliary (style/merge/
+// dimension) state before and after -- cheap given how little of that data
+// typically exists -- and undo/redo restores it wholesale alongside the
+// hf.undo()/redo() call that handles content.
+interface AuxSnapshot {
+  styles: StyleSnapshotEntry[]
+  merges: SerializedMerge[]
+  rowHeights: SerializedRowHeight[]
+  colWidths: SerializedColWidth[]
+}
+interface StructureUndoMarker {
+  kind: 'structure'
+  sheetId: number
+  before: AuxSnapshot
+  after: AuxSnapshot
+}
+type UndoMarker = ContentUndoMarker | StyleUndoMarker | MergeUndoMarker | DimensionUndoMarker | StructureUndoMarker
 
 export class EngineAdapter {
   private hf: HyperFormula
@@ -259,6 +286,65 @@ export class EngineAdapter {
     this.pushMarker({ kind: 'dimension', sheetId, axis: 'col', index: col, before, after })
   }
 
+  private captureAux(sheetId: number): AuxSnapshot {
+    return {
+      styles: this.styleStore.serializeSheet(sheetId),
+      merges: this.styleStore.mergesFor(sheetId),
+      rowHeights: this.dimensionsStore.serializeRowHeights(sheetId),
+      colWidths: this.dimensionsStore.serializeColWidths(sheetId)
+    }
+  }
+
+  private restoreAux(sheetId: number, snap: AuxSnapshot): void {
+    this.styleStore.loadSheetStyles(sheetId, snap.styles)
+    this.styleStore.setMerges(sheetId, snap.merges)
+    this.dimensionsStore.loadSheet(sheetId, snap.rowHeights, snap.colWidths)
+  }
+
+  /** No-op (no undo entry) if `count` isn't positive or hf refuses the operation (e.g. past sheet capacity). */
+  insertRows(at: number, count: number): void {
+    const sheetId = this.activeSheetId
+    if (count <= 0 || !this.hf.isItPossibleToAddRows(sheetId, [at, count])) return
+    const before = this.captureAux(sheetId)
+    this.hf.addRows(sheetId, [at, count])
+    this.styleStore.insertRows(sheetId, at, count)
+    this.dimensionsStore.insertRows(sheetId, at, count)
+    this.pushMarker({ kind: 'structure', sheetId, before, after: this.captureAux(sheetId) })
+  }
+
+  /** No-op (no undo entry) if `count` isn't positive or hf refuses the operation. */
+  deleteRows(at: number, count: number): void {
+    const sheetId = this.activeSheetId
+    if (count <= 0 || !this.hf.isItPossibleToRemoveRows(sheetId, [at, count])) return
+    const before = this.captureAux(sheetId)
+    this.hf.removeRows(sheetId, [at, count])
+    this.styleStore.deleteRows(sheetId, at, count)
+    this.dimensionsStore.deleteRows(sheetId, at, count)
+    this.pushMarker({ kind: 'structure', sheetId, before, after: this.captureAux(sheetId) })
+  }
+
+  /** No-op (no undo entry) if `count` isn't positive or hf refuses the operation (e.g. past sheet capacity). */
+  insertCols(at: number, count: number): void {
+    const sheetId = this.activeSheetId
+    if (count <= 0 || !this.hf.isItPossibleToAddColumns(sheetId, [at, count])) return
+    const before = this.captureAux(sheetId)
+    this.hf.addColumns(sheetId, [at, count])
+    this.styleStore.insertCols(sheetId, at, count)
+    this.dimensionsStore.insertCols(sheetId, at, count)
+    this.pushMarker({ kind: 'structure', sheetId, before, after: this.captureAux(sheetId) })
+  }
+
+  /** No-op (no undo entry) if `count` isn't positive or hf refuses the operation. */
+  deleteCols(at: number, count: number): void {
+    const sheetId = this.activeSheetId
+    if (count <= 0 || !this.hf.isItPossibleToRemoveColumns(sheetId, [at, count])) return
+    const before = this.captureAux(sheetId)
+    this.hf.removeColumns(sheetId, [at, count])
+    this.styleStore.deleteCols(sheetId, at, count)
+    this.dimensionsStore.deleteCols(sheetId, at, count)
+    this.pushMarker({ kind: 'structure', sheetId, before, after: this.captureAux(sheetId) })
+  }
+
   getSheetDimensions(): { rows: number; cols: number } {
     const dims = this.hf.getSheetDimensions(this.activeSheetId)
     return { rows: dims.height, cols: dims.width }
@@ -352,11 +438,12 @@ export class EngineAdapter {
   undo(): CellSnapshot[] {
     const marker = this.undoStack.pop()
     if (!marker) return []
-    if (marker.kind === 'content') {
+    if (marker.kind === 'content' || marker.kind === 'structure') {
       const changes = this.hf
         .undo()
         .filter((change): change is ExportedCellChange => change instanceof ExportedCellChange)
         .map((change) => this.getCellSnapshot(change.row, change.col))
+      if (marker.kind === 'structure') this.restoreAux(marker.sheetId, marker.before)
       this.redoStack.push(marker)
       return changes
     }
@@ -371,11 +458,12 @@ export class EngineAdapter {
   redo(): CellSnapshot[] {
     const marker = this.redoStack.pop()
     if (!marker) return []
-    if (marker.kind === 'content') {
+    if (marker.kind === 'content' || marker.kind === 'structure') {
       const changes = this.hf
         .redo()
         .filter((change): change is ExportedCellChange => change instanceof ExportedCellChange)
         .map((change) => this.getCellSnapshot(change.row, change.col))
+      if (marker.kind === 'structure') this.restoreAux(marker.sheetId, marker.after)
       this.undoStack.push(marker)
       return changes
     }

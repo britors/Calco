@@ -131,4 +131,81 @@ describe('StyleStore', () => {
       expect(store.mergesFor(2)).toEqual([])
     })
   })
+
+  describe('insert/delete rows and columns', () => {
+    it('insertRows shifts style entries at/after the insertion point down, leaving earlier rows alone', () => {
+      const store = new StyleStore()
+      store.applyPatch(1, [{ row: 0, col: 0 }], { bold: true }) // before the insertion point
+      store.applyPatch(1, [{ row: 2, col: 0 }], { italic: true }) // at/after
+      store.insertRows(1, 1, 2) // insert 2 rows above row 1
+
+      expect(store.getStyle(1, 0, 0)).toEqual({ bold: true })
+      expect(store.getStyle(1, 2, 0)).toEqual({}) // old row 2 vacated
+      expect(store.getStyle(1, 4, 0)).toEqual({ italic: true }) // shifted from row 2 to row 4
+    })
+
+    it('insertCols is the column-axis mirror of insertRows', () => {
+      const store = new StyleStore()
+      store.applyPatch(1, [{ row: 0, col: 3 }], { bold: true })
+      store.insertCols(1, 1, 1)
+      expect(store.getStyle(1, 0, 3)).toEqual({})
+      expect(store.getStyle(1, 0, 4)).toEqual({ bold: true })
+    })
+
+    it('deleteRows drops style entries within the deleted range and shifts the rest up', () => {
+      const store = new StyleStore()
+      store.applyPatch(1, [{ row: 0, col: 0 }], { bold: true }) // before the deleted range, untouched
+      store.applyPatch(1, [{ row: 2, col: 0 }], { italic: true }) // inside rows 1-3, deleted
+      store.applyPatch(1, [{ row: 5, col: 0 }], { textColor: '#ff0000' }) // after, shifts up to row 2
+      store.deleteRows(1, 1, 3) // delete rows 1,2,3
+
+      expect(store.getStyle(1, 0, 0)).toEqual({ bold: true })
+      expect(store.getStyle(1, 2, 0)).toEqual({ textColor: '#ff0000' })
+      expect(store.serializeSheet(1)).toEqual(
+        expect.arrayContaining([{ row: 0, col: 0, style: { bold: true } }])
+      )
+      expect(store.serializeSheet(1)).toHaveLength(2)
+    })
+
+    it('deleteCols is the column-axis mirror of deleteRows', () => {
+      const store = new StyleStore()
+      store.applyPatch(1, [{ row: 0, col: 5 }], { bold: true })
+      store.deleteCols(1, 1, 3) // delete cols 1,2,3
+      expect(store.getStyle(1, 0, 2)).toEqual({ bold: true }) // old col 5 -> col 2
+    })
+
+    it('insertRows grows a merge that spans the insertion point', () => {
+      const store = new StyleStore()
+      store.addMerge(1, { minRow: 0, minCol: 0, maxRow: 3, maxCol: 1 })
+      store.insertRows(1, 2, 1) // insert 1 row inside the merge's span
+      expect(store.mergesFor(1)).toEqual([{ minRow: 0, minCol: 0, maxRow: 4, maxCol: 1 }])
+    })
+
+    it('insertRows shifts a merge entirely below the insertion point without resizing it', () => {
+      const store = new StyleStore()
+      store.addMerge(1, { minRow: 5, minCol: 0, maxRow: 6, maxCol: 1 })
+      store.insertRows(1, 0, 2)
+      expect(store.mergesFor(1)).toEqual([{ minRow: 7, minCol: 0, maxRow: 8, maxCol: 1 }])
+    })
+
+    it('deleteRows shrinks a merge whose span partially overlaps the deleted rows', () => {
+      const store = new StyleStore()
+      store.addMerge(1, { minRow: 1, minCol: 0, maxRow: 5, maxCol: 1 })
+      store.deleteRows(1, 2, 3) // delete rows 2,3,4 -- inside the merge
+      expect(store.mergesFor(1)).toEqual([{ minRow: 1, minCol: 0, maxRow: 2, maxCol: 1 }])
+    })
+
+    it('deleteRows drops a merge entirely contained in the deleted range', () => {
+      const store = new StyleStore()
+      store.addMerge(1, { minRow: 2, minCol: 0, maxRow: 3, maxCol: 1 })
+      store.deleteRows(1, 1, 5) // deletes rows 1..5, fully swallowing the merge
+      expect(store.mergesFor(1)).toEqual([])
+    })
+
+    it('is a no-op when nothing was styled/merged on the sheet', () => {
+      const store = new StyleStore()
+      expect(() => store.insertRows(1, 0, 5)).not.toThrow()
+      expect(() => store.deleteCols(1, 0, 5)).not.toThrow()
+    })
+  })
 })

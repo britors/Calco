@@ -96,4 +96,50 @@ describe('DimensionsStore', () => {
       expect(store.serializeColWidths(1)).toEqual([])
     })
   })
+
+  describe('insert/delete rows and columns', () => {
+    it('insertRows shifts overrides at/after the insertion point, leaving earlier ones alone', () => {
+      const store = new DimensionsStore()
+      store.setRowHeight(1, 0, 40) // before insertion point
+      store.setRowHeight(1, 2, 60) // at/after
+      store.insertRows(1, 1, 2) // insert 2 rows above row 1
+
+      expect(store.getRowHeight(1, 0)).toBe(40)
+      expect(store.getRowHeight(1, 2)).toBe(DEFAULT_ROW_HEIGHT) // vacated
+      expect(store.getRowHeight(1, 4)).toBe(60) // shifted from row 2
+    })
+
+    it('insertCols is the column-axis mirror of insertRows', () => {
+      const store = new DimensionsStore()
+      store.setColWidth(1, 3, 150)
+      store.insertCols(1, 1, 1)
+      expect(store.getColWidth(1, 3)).toBe(DEFAULT_COL_WIDTH)
+      expect(store.getColWidth(1, 4)).toBe(150)
+    })
+
+    it('deleteRows drops overrides within the deleted range and shifts the rest up', () => {
+      const store = new DimensionsStore()
+      store.setRowHeight(1, 0, 40)
+      store.setRowHeight(1, 2, 50) // deleted
+      store.setRowHeight(1, 5, 60) // shifts up to row 2
+      store.deleteRows(1, 1, 3) // delete rows 1,2,3
+
+      expect(store.getRowHeight(1, 0)).toBe(40)
+      expect(store.getRowHeight(1, 2)).toBe(60)
+      expect(store.serializeRowHeights(1)).toHaveLength(2)
+    })
+
+    it('deleteCols is the column-axis mirror of deleteRows', () => {
+      const store = new DimensionsStore()
+      store.setColWidth(1, 5, 150)
+      store.deleteCols(1, 1, 3)
+      expect(store.getColWidth(1, 2)).toBe(150)
+    })
+
+    it('is a no-op when nothing was resized on the sheet', () => {
+      const store = new DimensionsStore()
+      expect(() => store.insertRows(1, 0, 5)).not.toThrow()
+      expect(() => store.deleteCols(1, 0, 5)).not.toThrow()
+    })
+  })
 })

@@ -478,6 +478,109 @@ describe('EngineAdapter', () => {
     })
   })
 
+  describe('insert/delete row/column (spec section 6 -- "estrutura")', () => {
+    it('insertRows shifts content down and adjusts formula references', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(0, 0, 1)
+      engine.setCellContent(1, 0, 2)
+      engine.setCellContent(2, 0, '=A1+A2')
+      engine.insertRows(1, 1) // insert 1 row above row index 1
+
+      expect(engine.getCellSnapshot(0, 0).value).toBe(1) // A1 unchanged
+      expect(engine.getCellSnapshot(1, 0).value).toBeNull() // new blank row
+      expect(engine.getCellSnapshot(2, 0).value).toBe(2) // old A2 -> A3
+      expect(engine.getCellSnapshot(3, 0).raw).toBe('=A1+A3') // reference adjusted
+      expect(engine.getCellSnapshot(3, 0).value).toBe(3)
+    })
+
+    it('deleteRows removes content and turns references to the deleted row into #REF!', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(0, 0, 1)
+      engine.setCellContent(1, 0, 2)
+      engine.setCellContent(2, 0, '=A1+A2')
+      engine.deleteRows(1, 1) // delete row index 1 (the '2')
+
+      expect(engine.getCellSnapshot(1, 0).error).toBe('#REF!')
+    })
+
+    it('insertCols/deleteCols mirror insertRows/deleteRows on the column axis', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(0, 0, 1)
+      engine.setCellContent(0, 1, 2)
+      engine.insertCols(1, 1)
+      expect(engine.getCellSnapshot(0, 0).value).toBe(1)
+      expect(engine.getCellSnapshot(0, 1).value).toBeNull()
+      expect(engine.getCellSnapshot(0, 2).value).toBe(2)
+
+      engine.deleteCols(2, 1)
+      expect(engine.getCellSnapshot(0, 2).value).toBeNull()
+    })
+
+    it('shifts styles, merges and dimension overrides along with content', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(2, 0, 'x')
+      engine.applyStyle({ minRow: 2, maxRow: 2, minCol: 0, maxCol: 0 }, { bold: true })
+      engine.setRowHeight(2, 50)
+      engine.mergeRange({ minRow: 2, maxRow: 3, minCol: 0, maxCol: 1 })
+
+      engine.insertRows(1, 1) // insert 1 row above row 1 -- everything at/after row 1 shifts down by 1
+
+      expect(engine.getCellStyle(3, 0)).toEqual({ bold: true })
+      expect(engine.getRowHeight(3)).toBe(50)
+      expect(engine.getMerges()).toEqual([{ minRow: 3, minCol: 0, maxRow: 4, maxCol: 1 }])
+    })
+
+    it('undoes the whole structural change -- content, style, merge and dimension -- as one atomic step', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(2, 0, 'x')
+      engine.applyStyle({ minRow: 2, maxRow: 2, minCol: 0, maxCol: 0 }, { bold: true })
+      engine.setRowHeight(2, 50)
+
+      engine.insertRows(1, 1)
+      expect(engine.getCellSnapshot(3, 0).value).toBe('x')
+
+      engine.undo()
+      expect(engine.getCellSnapshot(2, 0).value).toBe('x')
+      expect(engine.getCellStyle(2, 0)).toEqual({ bold: true })
+      expect(engine.getRowHeight(2)).toBe(50)
+      expect(engine.getCellSnapshot(3, 0).value).toBeNull()
+
+      engine.redo()
+      expect(engine.getCellSnapshot(3, 0).value).toBe('x')
+      expect(engine.getCellStyle(3, 0)).toEqual({ bold: true })
+      expect(engine.getRowHeight(3)).toBe(50)
+    })
+
+    it('is a single undo step, not one per side effect (earlier unrelated actions stay intact)', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(0, 0, 1) // step 1
+      engine.applyStyle({ minRow: 5, maxRow: 5, minCol: 0, maxCol: 0 }, { bold: true }) // step 2
+      engine.insertRows(1, 1) // step 3 -- one 'structure' marker, however many stores it touches
+
+      engine.undo() // undoes only step 3
+      expect(engine.getCellStyle(5, 0)).toEqual({ bold: true }) // step 2 untouched
+      expect(engine.getCellSnapshot(0, 0).value).toBe(1) // step 1 untouched
+      expect(engine.canUndo()).toBe(true) // steps 1 and 2 are still there to undo
+
+      engine.undo() // undoes step 2
+      engine.undo() // undoes step 1
+      expect(engine.canUndo()).toBe(false)
+    })
+
+    it('persists correctly after an insert/delete, through serializeWorkbook / loadWorkbook', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(2, 0, '=1+1')
+      engine.applyStyle({ minRow: 2, maxRow: 2, minCol: 0, maxCol: 0 }, { italic: true })
+      engine.insertRows(0, 1)
+
+      const doc = engine.serializeWorkbook()
+      const reloaded = new EngineAdapter()
+      reloaded.loadWorkbook(doc)
+      expect(reloaded.getCellSnapshot(3, 0).value).toBe(2)
+      expect(reloaded.getCellStyle(3, 0)).toEqual({ italic: true })
+    })
+  })
+
   describe('sheet management', () => {
     it('lists sheets and reflects add/rename', () => {
       const engine = new EngineAdapter()
