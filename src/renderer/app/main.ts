@@ -6,8 +6,12 @@ import { mountFormulaBar, type FormulaBar } from './formula-bar'
 import { mountSheetTabs, type SheetTabsBar } from './sheet-tabs'
 import { mountFindReplaceBar, type FindReplaceBar } from './find-replace-bar'
 import { mountToolbar, type Toolbar } from './toolbar'
+import { mountCsvImportDialog, type CsvImportDialog } from './csv-import-dialog'
 import { packCalcoFile, unpackCalcoFile } from '../formats/calco-format'
-import type { CalcoAPI, MenuAction } from '@shared/ipc'
+import { workbookToXlsx, xlsxToWorkbook } from '../formats/xlsx-format'
+import { csvTextToSheet, decodeCsvBytes, stringifyDelimited } from '../formats/csv-format'
+import { buildValuesMatrix } from '../grid/clipboard'
+import type { CalcoAPI, ImportFormat, ExportFormat, MenuAction } from '@shared/ipc'
 import type { CellStyle, SerializedWorkbook } from '@shared/model'
 
 declare global {
@@ -29,6 +33,8 @@ const gridRegion = document.createElement('div')
 gridRegion.style.flex = '1'
 gridRegion.style.minHeight = '0' // flex children need this to size correctly with absolutely-positioned content
 const tabsRegion = document.createElement('div')
+
+const csvImportDialog: CsvImportDialog = mountCsvImportDialog(appRoot)
 
 appRoot.appendChild(toolbarRegion)
 appRoot.appendChild(formulaBarRegion)
@@ -235,6 +241,45 @@ async function handleOpen(): Promise<void> {
   loadDocument(doc, result.path)
 }
 
+// Importing a foreign format opens it as a new, unsaved Calco document --
+// the original .xlsx/.csv is left untouched, and Save prompts for a fresh
+// .calco path (matches the pattern of opening a foreign file in Excel).
+async function handleImport(format: ImportFormat): Promise<void> {
+  const result = await window.calco.file.import(format)
+  if (!result) return
+
+  if (format === 'xlsx') {
+    const doc = await xlsxToWorkbook(result.bytes)
+    loadDocument(doc, null)
+    return
+  }
+
+  const choice = await csvImportDialog.open()
+  if (!choice) return
+  const text = decodeCsvBytes(result.bytes, choice.encoding)
+  const sheet = csvTextToSheet(text, choice.delimiter, 'Sheet1')
+  loadDocument({ formatVersion: 1, sheets: [sheet], activeSheetIndex: 0 }, null)
+}
+
+async function handleExport(format: ExportFormat): Promise<void> {
+  if (format === 'xlsx') {
+    const doc = engine.serializeWorkbook()
+    const bytes = await workbookToXlsx(doc)
+    await window.calco.file.export(bytes, 'xlsx')
+    return
+  }
+
+  // CSV has no formula syntax -- export computed values over the sheet's
+  // full extent, not the raw formula text serializeWorkbook() would give.
+  const dims = engine.getSheetDimensions()
+  const matrix =
+    dims.rows > 0 && dims.cols > 0
+      ? buildValuesMatrix(engine, { minRow: 0, maxRow: dims.rows - 1, minCol: 0, maxCol: dims.cols - 1 })
+      : []
+  const csvText = stringifyDelimited(matrix, ';') // pt-BR delimiter convention (spec section 3)
+  await window.calco.file.export(new TextEncoder().encode(csvText), 'csv')
+}
+
 async function handleSave(): Promise<void> {
   const doc = engine.serializeWorkbook()
   const bytes = packCalcoFile(doc, appVersion)
@@ -276,4 +321,6 @@ window.calco.app.onMenuAction((action: MenuAction) => {
   else if (action.type === 'saveAs') void handleSaveAs()
   else if (action.type === 'undo') handleUndo()
   else if (action.type === 'redo') handleRedo()
+  else if (action.type === 'import') void handleImport(action.format)
+  else if (action.type === 'export') void handleExport(action.format)
 })

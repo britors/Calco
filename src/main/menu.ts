@@ -20,6 +20,21 @@ export function buildMenu(win: BrowserWindow): void {
           label: 'Salvar como...',
           accelerator: 'CmdOrCtrl+Shift+S',
           click: () => send({ type: 'saveAs' })
+        },
+        { type: 'separator' },
+        {
+          label: 'Importar',
+          submenu: [
+            { label: 'Excel (.xlsx)...', click: () => send({ type: 'import', format: 'xlsx' }) },
+            { label: 'CSV (.csv)...', click: () => send({ type: 'import', format: 'csv' }) }
+          ]
+        },
+        {
+          label: 'Exportar',
+          submenu: [
+            { label: 'Excel (.xlsx)...', click: () => send({ type: 'export', format: 'xlsx' }) },
+            { label: 'CSV (.csv)...', click: () => send({ type: 'export', format: 'csv' }) }
+          ]
         }
       ]
     },

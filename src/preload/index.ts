@@ -6,7 +6,8 @@ const api: CalcoAPI = {
     open: () => ipcRenderer.invoke(IPC_CHANNELS.fileOpen),
     save: (bytes, path) => ipcRenderer.invoke(IPC_CHANNELS.fileSave, bytes, path),
     saveAs: (bytes) => ipcRenderer.invoke(IPC_CHANNELS.fileSaveAs, bytes),
-    export: (doc, format) => ipcRenderer.invoke(IPC_CHANNELS.fileExport, doc, format),
+    import: (format) => ipcRenderer.invoke(IPC_CHANNELS.fileImport, format),
+    export: (bytes, format) => ipcRenderer.invoke(IPC_CHANNELS.fileExport, bytes, format),
     getRecent: () => ipcRenderer.invoke(IPC_CHANNELS.fileGetRecent)
   },
   app: {

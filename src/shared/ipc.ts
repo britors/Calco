@@ -1,14 +1,16 @@
 // Canonical IPC contract between preload (CalcoAPI) and main process handlers.
-// file.open/save/saveAs carry raw .calco bytes -- main never parses the
-// format, it only does dialogs + fs I/O (see renderer/formats/calco-format.ts
-// for the pack/unpack logic, which lives in the sandboxed renderer).
-
-import type { SerializedWorkbook } from './model'
+// file.open/save/saveAs/import/export all carry raw bytes -- main never
+// parses any file format, it only does dialogs + fs I/O (see
+// renderer/formats/ for the pack/unpack + xlsx/csv conversion logic, which
+// lives in the sandboxed renderer).
 
 export interface OpenResult {
   path: string
   bytes: Uint8Array
 }
+
+export type ImportFormat = 'xlsx' | 'csv'
+export type ExportFormat = 'xlsx' | 'csv'
 
 export interface SaveResult {
   ok: boolean
@@ -29,14 +31,18 @@ export type MenuAction =
   | { type: 'saveAs' }
   | { type: 'undo' }
   | { type: 'redo' }
+  | { type: 'import'; format: ImportFormat }
+  | { type: 'export'; format: ExportFormat }
 
 export interface CalcoAPI {
   file: {
     open(): Promise<OpenResult | null>
     save(bytes: Uint8Array, path: string): Promise<SaveResult>
     saveAs(bytes: Uint8Array): Promise<SaveResult>
-    // Still stubbed -- xlsx/csv/pdf export is a later milestone.
-    export(doc: SerializedWorkbook, format: 'xlsx' | 'csv' | 'pdf'): Promise<SaveResult>
+    // Renderer-parsed, same as open/save -- main only shows the dialog and
+    // reads/writes the raw bytes it gets back.
+    import(format: ImportFormat): Promise<OpenResult | null>
+    export(bytes: Uint8Array, format: ExportFormat): Promise<SaveResult>
     getRecent(): Promise<RecentFile[]>
   }
   app: {
@@ -55,6 +61,7 @@ export const IPC_CHANNELS = {
   fileOpen: 'file:open',
   fileSave: 'file:save',
   fileSaveAs: 'file:save-as',
+  fileImport: 'file:import',
   fileExport: 'file:export',
   fileGetRecent: 'file:get-recent',
   appGetVersion: 'app:get-version',
