@@ -53,6 +53,46 @@ describe('EngineAdapter', () => {
     expect(snapshot.raw).toBe('')
   })
 
+  describe('pt-BR locale (spec section 3)', () => {
+    it('accepts pt-BR function names, the `;` separator and `,` decimals', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(0, 0, 2)
+      engine.setCellContent(0, 1, 3)
+      engine.setCellContent(0, 2, '=SOMA(A1;B1)*1,5')
+      expect(engine.getCellSnapshot(0, 2).value).toBe(7.5)
+      expect(engine.getCellSnapshot(0, 2).raw).toBe('=SOMA(A1;B1)*1,5')
+    })
+
+    it('still accepts English function names as input, displayed back in pt-BR', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(0, 0, 2)
+      engine.setCellContent(0, 1, 3)
+      engine.setCellContent(0, 2, '=SUM(A1;B1)')
+      expect(engine.getCellSnapshot(0, 2).value).toBe(5)
+      expect(engine.getCellSnapshot(0, 2).raw).toBe('=SOMA(A1;B1)')
+    })
+
+    it('persists formulas as canonical English with a comma separator', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(0, 0, '=SE(1>0;1;0)')
+      const doc = engine.serializeWorkbook()
+      expect(doc.sheets[0].cells).toEqual([{ row: 0, col: 0, content: '=IF(1>0,1,0)' }])
+    })
+
+    it('round-trips a pt-BR formula through save and reload', () => {
+      const original = new EngineAdapter()
+      original.setCellContent(0, 0, 4)
+      original.setCellContent(0, 1, '=SOMA(A1;10)*1,5')
+      const doc = original.serializeWorkbook()
+
+      const reloaded = new EngineAdapter()
+      reloaded.loadWorkbook(doc)
+      expect(reloaded.getCellSnapshot(0, 1).value).toBe(21)
+      expect(reloaded.getCellSnapshot(0, 1).raw).toBe('=SOMA(A1;10)*1,5')
+      expect(reloaded.serializeWorkbook()).toEqual(doc)
+    })
+  })
+
   describe('serializeWorkbook / loadWorkbook', () => {
     it('serializes a sparse cell list, retaining falsy-but-present values', () => {
       const engine = new EngineAdapter()
@@ -217,6 +257,157 @@ describe('EngineAdapter', () => {
       engine.clearClipboard()
       expect(engine.isClipboardEmpty()).toBe(true)
       expect(engine.pasteAt(1, 1)).toEqual([])
+    })
+  })
+
+  describe('cell styling (spec section 6)', () => {
+    it('applies and reads back a style patch, defaulting to {} when unstyled', () => {
+      const engine = new EngineAdapter()
+      expect(engine.getCellStyle(0, 0)).toEqual({})
+      engine.applyStyle({ minRow: 0, maxRow: 0, minCol: 0, maxCol: 0 }, { bold: true })
+      expect(engine.getCellStyle(0, 0)).toEqual({ bold: true })
+    })
+
+    it('applies a style patch across an entire range', () => {
+      const engine = new EngineAdapter()
+      engine.applyStyle({ minRow: 0, maxRow: 1, minCol: 0, maxCol: 1 }, { backgroundColor: '#ffff00' })
+      expect(engine.getCellStyle(0, 0).backgroundColor).toBe('#ffff00')
+      expect(engine.getCellStyle(1, 1).backgroundColor).toBe('#ffff00')
+      expect(engine.getCellStyle(2, 2).backgroundColor).toBeUndefined()
+    })
+
+    it('keeps styles independent per sheet', () => {
+      const engine = new EngineAdapter()
+      const secondId = engine.addSheet('Sheet2')
+      engine.applyStyle({ minRow: 0, maxRow: 0, minCol: 0, maxCol: 0 }, { bold: true })
+      engine.setActiveSheetId(secondId)
+      expect(engine.getCellStyle(0, 0)).toEqual({})
+    })
+
+    it('persists styles through serializeWorkbook / loadWorkbook', () => {
+      const engine = new EngineAdapter()
+      engine.applyStyle({ minRow: 0, maxRow: 0, minCol: 0, maxCol: 0 }, { bold: true, textColor: '#ff0000' })
+      const doc = engine.serializeWorkbook()
+      expect(doc.sheets[0].styles).toEqual([{ row: 0, col: 0, style: { bold: true, textColor: '#ff0000' } }])
+
+      const reloaded = new EngineAdapter()
+      reloaded.loadWorkbook(doc)
+      expect(reloaded.getCellStyle(0, 0)).toEqual({ bold: true, textColor: '#ff0000' })
+    })
+
+    it('omits the styles key entirely for an unstyled sheet', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(0, 0, 1)
+      const doc = engine.serializeWorkbook()
+      expect(doc.sheets[0].styles).toBeUndefined()
+    })
+  })
+
+  describe('merges (spec section 6)', () => {
+    it('merges a range and finds it from any contained cell', () => {
+      const engine = new EngineAdapter()
+      engine.mergeRange({ minRow: 0, maxRow: 1, minCol: 0, maxCol: 1 })
+      expect(engine.findMergeContaining(1, 1)).toEqual({ minRow: 0, minCol: 0, maxRow: 1, maxCol: 1 })
+      expect(engine.getMerges()).toEqual([{ minRow: 0, minCol: 0, maxRow: 1, maxCol: 1 }])
+    })
+
+    it('no-ops on a single-cell range', () => {
+      const engine = new EngineAdapter()
+      engine.mergeRange({ minRow: 0, maxRow: 0, minCol: 0, maxCol: 0 })
+      expect(engine.getMerges()).toEqual([])
+    })
+
+    it('no-ops when the new range overlaps an existing merge', () => {
+      const engine = new EngineAdapter()
+      engine.mergeRange({ minRow: 0, maxRow: 1, minCol: 0, maxCol: 1 })
+      engine.mergeRange({ minRow: 1, maxRow: 2, minCol: 1, maxCol: 2 })
+      expect(engine.getMerges()).toHaveLength(1)
+    })
+
+    it('unmergeAt removes the merge containing that cell', () => {
+      const engine = new EngineAdapter()
+      engine.mergeRange({ minRow: 0, maxRow: 1, minCol: 0, maxCol: 1 })
+      engine.unmergeAt(0, 1)
+      expect(engine.getMerges()).toEqual([])
+    })
+
+    it('persists merges through serializeWorkbook / loadWorkbook', () => {
+      const engine = new EngineAdapter()
+      engine.mergeRange({ minRow: 2, maxRow: 3, minCol: 2, maxCol: 3 })
+      const doc = engine.serializeWorkbook()
+      expect(doc.sheets[0].merges).toEqual([{ minRow: 2, minCol: 2, maxRow: 3, maxCol: 3 }])
+
+      const reloaded = new EngineAdapter()
+      reloaded.loadWorkbook(doc)
+      expect(reloaded.getMerges()).toEqual([{ minRow: 2, minCol: 2, maxRow: 3, maxCol: 3 }])
+    })
+  })
+
+  describe('unified undo/redo across content + style + merge', () => {
+    it('undoes a style change without touching prior cell content', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(0, 0, 42)
+      engine.applyStyle({ minRow: 0, maxRow: 0, minCol: 0, maxCol: 0 }, { bold: true })
+
+      engine.undo()
+      expect(engine.getCellStyle(0, 0)).toEqual({})
+      expect(engine.getCellSnapshot(0, 0).value).toBe(42)
+    })
+
+    it('undoes in exact chronological order across mixed content/style/merge actions', () => {
+      const engine = new EngineAdapter()
+      engine.setCellContent(0, 0, 1) // 1: content
+      engine.applyStyle({ minRow: 0, maxRow: 0, minCol: 0, maxCol: 0 }, { bold: true }) // 2: style
+      engine.mergeRange({ minRow: 0, maxRow: 1, minCol: 0, maxCol: 1 }) // 3: merge
+      engine.setCellContent(1, 1, 2) // 4: content
+
+      engine.undo() // undoes 4
+      expect(engine.getCellSnapshot(1, 1).value).toBeNull()
+      expect(engine.getMerges()).toHaveLength(1)
+
+      engine.undo() // undoes 3
+      expect(engine.getMerges()).toEqual([])
+      expect(engine.getCellStyle(0, 0)).toEqual({ bold: true })
+
+      engine.undo() // undoes 2
+      expect(engine.getCellStyle(0, 0)).toEqual({})
+      expect(engine.getCellSnapshot(0, 0).value).toBe(1)
+
+      engine.undo() // undoes 1
+      expect(engine.getCellSnapshot(0, 0).value).toBeNull()
+      expect(engine.canUndo()).toBe(false)
+    })
+
+    it('redo replays a style change back on', () => {
+      const engine = new EngineAdapter()
+      engine.applyStyle({ minRow: 0, maxRow: 0, minCol: 0, maxCol: 0 }, { italic: true })
+      engine.undo()
+      expect(engine.getCellStyle(0, 0)).toEqual({})
+
+      engine.redo()
+      expect(engine.getCellStyle(0, 0)).toEqual({ italic: true })
+    })
+
+    it('a new action after an undo clears the redo stack, content and style alike', () => {
+      const engine = new EngineAdapter()
+      engine.applyStyle({ minRow: 0, maxRow: 0, minCol: 0, maxCol: 0 }, { bold: true })
+      engine.undo()
+      expect(engine.canRedo()).toBe(true)
+
+      engine.setCellContent(0, 0, 'fresh action')
+      expect(engine.canRedo()).toBe(false)
+      engine.redo()
+      expect(engine.getCellStyle(0, 0)).toEqual({}) // the old style redo never replayed
+    })
+
+    it('canUndo/canRedo reflect style and merge actions, not just content', () => {
+      const engine = new EngineAdapter()
+      expect(engine.canUndo()).toBe(false)
+      engine.mergeRange({ minRow: 0, maxRow: 1, minCol: 0, maxCol: 1 })
+      expect(engine.canUndo()).toBe(true)
+      engine.undo()
+      expect(engine.canUndo()).toBe(false)
+      expect(engine.canRedo()).toBe(true)
     })
   })
 

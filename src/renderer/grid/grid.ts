@@ -1,7 +1,7 @@
 import { EngineAdapter, MAX_COLS, MAX_ROWS } from '../engine/engine-adapter'
 import type { GridMetrics, ScrollState } from './viewport'
 import { hitTest, hitTestColumnHeader, hitTestRowHeader } from './hit-test'
-import { Selection } from './selection'
+import { Selection, type NormalizedRange } from './selection'
 import { computeUsedRegion } from './used-region'
 import { buildHtmlTable, buildTsv, buildValuesMatrix, parseTsv } from './clipboard'
 import { render } from './render'
@@ -19,6 +19,8 @@ export interface MountedGrid {
   refresh(): void
   /** Selects and scrolls to (row, col) -- same effect as clicking that cell (e.g. jumping to a find-match). */
   selectCell(row: number, col: number): void
+  /** The current selection range -- for callers applying an action (e.g. a toolbar button) to "whatever's selected". */
+  getSelectionRange(): NormalizedRange
   destroy(): void
 }
 
@@ -207,10 +209,11 @@ export function mountGrid(container: HTMLElement, engine: EngineAdapter, options
 
     const hit = hitTest(x, y, METRICS, scroll)
     if (hit) {
+      const target = mergeAnchorOf(hit.row, hit.col)
       if (e.shiftKey) {
-        selection.extendTo(hit.row, hit.col)
+        selection.extendTo(target.row, target.col)
       } else {
-        selection.moveTo(hit.row, hit.col)
+        selection.moveTo(target.row, target.col)
         isDragging = true
         window.addEventListener('mousemove', handleWindowMouseMove)
         window.addEventListener('mouseup', handleWindowMouseUp)
@@ -220,12 +223,19 @@ export function mountGrid(container: HTMLElement, engine: EngineAdapter, options
     }
   }
 
+  /** Clicking anywhere inside a merged range selects/edits its top-left anchor cell. */
+  function mergeAnchorOf(row: number, col: number): { row: number; col: number } {
+    const merge = engine.findMergeContaining(row, col)
+    return merge ? { row: merge.minRow, col: merge.minCol } : { row, col }
+  }
+
   function handleDoubleClick(e: MouseEvent): void {
     const rect = canvas.getBoundingClientRect()
     const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top, METRICS, currentScroll())
     if (hit) {
-      selection.moveTo(hit.row, hit.col)
-      openEditorAt(hit.row, hit.col, null)
+      const target = mergeAnchorOf(hit.row, hit.col)
+      selection.moveTo(target.row, target.col)
+      openEditorAt(target.row, target.col, null)
     }
   }
 
@@ -397,6 +407,9 @@ export function mountGrid(container: HTMLElement, engine: EngineAdapter, options
       selection.moveTo(row, col)
       ensureVisible(row, col)
       scheduleRender()
+    },
+    getSelectionRange(): NormalizedRange {
+      return selection.normalized
     },
     destroy(): void {
       resizeObserver.disconnect()

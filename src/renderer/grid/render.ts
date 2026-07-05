@@ -1,7 +1,8 @@
 import type { EngineAdapter } from '../engine/engine-adapter'
 import { computeVisibleRange, type GridMetrics, type ScrollState, type VisibleRange } from './viewport'
-import { cellRect } from './hit-test'
+import { cellRect, type CellRect } from './hit-test'
 import type { CellPos, NormalizedRange } from './selection'
+import type { CellBorders, HorizontalAlign, SerializedMerge, VerticalAlign } from '@shared/model'
 
 const COLORS = {
   background: '#ffffff',
@@ -59,6 +60,7 @@ export function render(rc: RenderContext): void {
 
   drawBodyGridlines(rc, range)
   drawCellContent(rc, range)
+  drawCellBorders(rc, range)
   drawSelection(rc, range)
   drawHeaders(rc, range)
 
@@ -99,29 +101,153 @@ function drawBodyGridlines(rc: RenderContext, range: VisibleRange): void {
   ctx.restore()
 }
 
+/** Cells covered by a merge that intersects the visible range, keyed "row,col" --
+ *  shared by the content and border passes so both skip non-anchor members
+ *  the same way (the anchor's cell draws the whole merged span once). */
+function visibleMergeMemberCells(engine: EngineAdapter, range: VisibleRange): Map<string, SerializedMerge> {
+  const members = new Map<string, SerializedMerge>()
+  for (const merge of engine.getMerges()) {
+    if (merge.maxRow < range.startRow || merge.minRow > range.endRow) continue
+    if (merge.maxCol < range.startCol || merge.minCol > range.endCol) continue
+    for (let r = Math.max(merge.minRow, range.startRow); r <= Math.min(merge.maxRow, range.endRow); r++) {
+      for (let c = Math.max(merge.minCol, range.startCol); c <= Math.min(merge.maxCol, range.endCol); c++) {
+        members.set(`${r},${c}`, merge)
+      }
+    }
+  }
+  return members
+}
+
+function textXAndAlign(rect: CellRect, hAlign: HorizontalAlign | undefined): { x: number; align: CanvasTextAlign } {
+  if (hAlign === 'center') return { x: rect.x + rect.width / 2, align: 'center' }
+  if (hAlign === 'right') return { x: rect.x + rect.width - 4, align: 'right' }
+  return { x: rect.x + 4, align: 'left' }
+}
+
+function textYAndBaseline(rect: CellRect, vAlign: VerticalAlign | undefined): { y: number; baseline: CanvasTextBaseline } {
+  if (vAlign === 'top') return { y: rect.y + 2, baseline: 'top' }
+  if (vAlign === 'bottom') return { y: rect.y + rect.height - 2, baseline: 'bottom' }
+  return { y: rect.y + rect.height / 2, baseline: 'middle' }
+}
+
+/** Draws one logical cell (a plain cell, or a merge's full spanning rect) --
+ *  background, then text. `isMerged` forces a background fill even with no
+ *  custom color, to erase the plain gridlines drawn underneath a merge's span. */
+function drawOneCell(rc: RenderContext, anchorRow: number, anchorCol: number, rect: CellRect, isMerged: boolean): void {
+  const { ctx, engine } = rc
+  const style = engine.getCellStyle(anchorRow, anchorCol)
+
+  if (style.backgroundColor) {
+    ctx.fillStyle = style.backgroundColor
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height)
+  } else if (isMerged) {
+    ctx.fillStyle = COLORS.background
+    ctx.fillRect(rect.x, rect.y, rect.width, rect.height)
+  }
+
+  const snapshot = engine.getCellSnapshot(anchorRow, anchorCol)
+  if (snapshot.value === null && !snapshot.error) return
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.rect(rect.x, rect.y, rect.width, rect.height)
+  ctx.clip()
+
+  ctx.font = `${style.italic ? 'italic ' : ''}${style.bold ? 'bold ' : ''}13px sans-serif`
+  ctx.fillStyle = snapshot.error ? COLORS.errorText : (style.textColor ?? COLORS.cellText)
+
+  const { x, align } = textXAndAlign(rect, style.hAlign)
+  const { y, baseline } = textYAndBaseline(rect, style.vAlign)
+  ctx.textAlign = align
+  ctx.textBaseline = baseline
+  ctx.fillText(snapshot.error ?? String(snapshot.value), x, y, rect.width - 8)
+  ctx.restore()
+}
+
 function drawCellContent(rc: RenderContext, range: VisibleRange): void {
   const { ctx, metrics, scroll, engine } = rc
   ctx.save()
   bodyClip(rc)
 
+  const mergeMembers = visibleMergeMemberCells(engine, range)
+  const drawnAnchors = new Set<string>()
+  for (const merge of mergeMembers.values()) {
+    const anchorKey = `${merge.minRow},${merge.minCol}`
+    if (drawnAnchors.has(anchorKey)) continue
+    drawnAnchors.add(anchorKey)
+    const rect = boundingScreenRect(merge.minRow, merge.minCol, merge.maxRow, merge.maxCol, metrics, scroll)
+    drawOneCell(rc, merge.minRow, merge.minCol, rect, true)
+  }
+
   for (let row = range.startRow; row <= range.endRow; row++) {
     for (let col = range.startCol; col <= range.endCol; col++) {
-      const snapshot = engine.getCellSnapshot(row, col)
-      if (snapshot.error) {
-        ctx.fillStyle = COLORS.errorText
-      } else if (snapshot.value === null) {
-        continue
-      } else {
-        ctx.fillStyle = COLORS.cellText
-      }
-      const rect = cellRect(row, col, metrics, scroll)
-      const text = snapshot.error ?? String(snapshot.value)
-      ctx.save()
-      ctx.beginPath()
-      ctx.rect(rect.x, rect.y, rect.width, rect.height)
-      ctx.clip()
-      ctx.fillText(text, rect.x + 4, rect.y + rect.height / 2, rect.width - 8)
-      ctx.restore()
+      if (mergeMembers.has(`${row},${col}`)) continue
+      drawOneCell(rc, row, col, cellRect(row, col, metrics, scroll), false)
+    }
+  }
+  ctx.restore()
+}
+
+function strokeBorderSide(ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number, color: string): void {
+  ctx.strokeStyle = color
+  ctx.beginPath()
+  ctx.moveTo(x1, y1)
+  ctx.lineTo(x2, y2)
+  ctx.stroke()
+}
+
+function drawBordersForRect(ctx: CanvasRenderingContext2D, rect: CellRect, borders: CellBorders): void {
+  ctx.lineWidth = 1.5
+  if (borders.top) strokeBorderSide(ctx, rect.x, rect.y + 0.75, rect.x + rect.width, rect.y + 0.75, borders.top.color)
+  if (borders.bottom) {
+    strokeBorderSide(
+      ctx,
+      rect.x,
+      rect.y + rect.height - 0.75,
+      rect.x + rect.width,
+      rect.y + rect.height - 0.75,
+      borders.bottom.color
+    )
+  }
+  if (borders.left) strokeBorderSide(ctx, rect.x + 0.75, rect.y, rect.x + 0.75, rect.y + rect.height, borders.left.color)
+  if (borders.right) {
+    strokeBorderSide(
+      ctx,
+      rect.x + rect.width - 0.75,
+      rect.y,
+      rect.x + rect.width - 0.75,
+      rect.y + rect.height,
+      borders.right.color
+    )
+  }
+}
+
+function drawCellBorders(rc: RenderContext, range: VisibleRange): void {
+  const { ctx, metrics, scroll, engine } = rc
+  ctx.save()
+  bodyClip(rc)
+
+  const mergeMembers = visibleMergeMemberCells(engine, range)
+  const drawnAnchors = new Set<string>()
+  for (const merge of mergeMembers.values()) {
+    const anchorKey = `${merge.minRow},${merge.minCol}`
+    if (drawnAnchors.has(anchorKey)) continue
+    drawnAnchors.add(anchorKey)
+    const style = engine.getCellStyle(merge.minRow, merge.minCol)
+    if (style.borders) {
+      drawBordersForRect(
+        ctx,
+        boundingScreenRect(merge.minRow, merge.minCol, merge.maxRow, merge.maxCol, metrics, scroll),
+        style.borders
+      )
+    }
+  }
+
+  for (let row = range.startRow; row <= range.endRow; row++) {
+    for (let col = range.startCol; col <= range.endCol; col++) {
+      if (mergeMembers.has(`${row},${col}`)) continue
+      const style = engine.getCellStyle(row, col)
+      if (style.borders) drawBordersForRect(ctx, cellRect(row, col, metrics, scroll), style.borders)
     }
   }
   ctx.restore()

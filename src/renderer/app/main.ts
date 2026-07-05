@@ -5,9 +5,10 @@ import { findMatches, replaceAll, replaceInCell, type CellMatch } from '../grid/
 import { mountFormulaBar, type FormulaBar } from './formula-bar'
 import { mountSheetTabs, type SheetTabsBar } from './sheet-tabs'
 import { mountFindReplaceBar, type FindReplaceBar } from './find-replace-bar'
+import { mountToolbar, type Toolbar } from './toolbar'
 import { packCalcoFile, unpackCalcoFile } from '../formats/calco-format'
 import type { CalcoAPI, MenuAction } from '@shared/ipc'
-import type { SerializedWorkbook } from '@shared/model'
+import type { CellStyle, SerializedWorkbook } from '@shared/model'
 
 declare global {
   interface Window {
@@ -22,12 +23,14 @@ appRoot.style.display = 'flex'
 appRoot.style.flexDirection = 'column'
 appRoot.style.height = '100%'
 
+const toolbarRegion = document.createElement('div')
 const formulaBarRegion = document.createElement('div')
 const gridRegion = document.createElement('div')
 gridRegion.style.flex = '1'
 gridRegion.style.minHeight = '0' // flex children need this to size correctly with absolutely-positioned content
 const tabsRegion = document.createElement('div')
 
+appRoot.appendChild(toolbarRegion)
 appRoot.appendChild(formulaBarRegion)
 appRoot.appendChild(gridRegion)
 appRoot.appendChild(tabsRegion)
@@ -41,6 +44,44 @@ let appVersion = ''
 const formulaBar: FormulaBar = mountFormulaBar(formulaBarRegion, {
   onCommit: (value) => {
     engine.setCellContent(lastActiveCell.row, lastActiveCell.col, value)
+    grid.refresh()
+  }
+})
+
+function applyStyleToSelection(patch: CellStyle): void {
+  engine.applyStyle(grid.getSelectionRange(), patch)
+  grid.refresh()
+}
+
+const toolbar: Toolbar = mountToolbar(toolbarRegion, {
+  onToggleBold: () => {
+    const current = engine.getCellStyle(lastActiveCell.row, lastActiveCell.col)
+    applyStyleToSelection({ bold: !current.bold })
+  },
+  onToggleItalic: () => {
+    const current = engine.getCellStyle(lastActiveCell.row, lastActiveCell.col)
+    applyStyleToSelection({ italic: !current.italic })
+  },
+  onTextColor: (color) => applyStyleToSelection({ textColor: color }),
+  onBackgroundColor: (color) => applyStyleToSelection({ backgroundColor: color }),
+  onToggleBorder: () => {
+    const current = engine.getCellStyle(lastActiveCell.row, lastActiveCell.col)
+    const hasFullBorder = Boolean(
+      current.borders?.top && current.borders?.right && current.borders?.bottom && current.borders?.left
+    )
+    const color = { color: '#000000' }
+    applyStyleToSelection({
+      borders: hasFullBorder
+        ? { top: undefined, right: undefined, bottom: undefined, left: undefined }
+        : { top: color, right: color, bottom: color, left: color }
+    })
+  },
+  onAlignH: (align) => applyStyleToSelection({ hAlign: align }),
+  onAlignV: (align) => applyStyleToSelection({ vAlign: align }),
+  onToggleMerge: () => {
+    const existingMerge = engine.findMergeContaining(lastActiveCell.row, lastActiveCell.col)
+    if (existingMerge) engine.unmergeAt(lastActiveCell.row, lastActiveCell.col)
+    else engine.mergeRange(grid.getSelectionRange())
     grid.refresh()
   }
 })
@@ -82,6 +123,7 @@ function mountGridWithHandlers(): MountedGrid {
       lastActiveCell = { row, col }
       formulaBar.setName(`${columnLabel(col)}${row + 1}`)
       formulaBar.setValue(engine.getCellSnapshot(row, col).raw)
+      toolbar.setActiveStyle(engine.getCellStyle(row, col), engine.findMergeContaining(row, col) !== undefined)
     }
   })
 }
