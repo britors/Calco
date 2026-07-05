@@ -2,6 +2,7 @@ import { HyperFormula, DetailedCellError, ExportedCellChange } from 'hyperformul
 import type { CellStyle, SerializedCell, SerializedMerge, SerializedWorkbook } from '@shared/model'
 import { LOCALE_CODE, ensureLocaleRegistered, toCanonicalFormula, toDisplayFormula } from './formula-locale'
 import { StyleStore, type CellPos, type StyleSnapshotEntry } from './style-store'
+import { DimensionsStore } from './dimensions-store'
 
 export interface CellSnapshot {
   raw: string
@@ -53,12 +54,21 @@ interface MergeUndoMarker {
   before: SerializedMerge[]
   after: SerializedMerge[]
 }
-type UndoMarker = ContentUndoMarker | StyleUndoMarker | MergeUndoMarker
+interface DimensionUndoMarker {
+  kind: 'dimension'
+  sheetId: number
+  axis: 'row' | 'col'
+  index: number
+  before: number | undefined
+  after: number
+}
+type UndoMarker = ContentUndoMarker | StyleUndoMarker | MergeUndoMarker | DimensionUndoMarker
 
 export class EngineAdapter {
   private hf: HyperFormula
   private activeSheetId: number
   private styleStore = new StyleStore()
+  private dimensionsStore = new DimensionsStore()
   private undoStack: UndoMarker[] = []
   private redoStack: UndoMarker[] = []
 
@@ -125,6 +135,7 @@ export class EngineAdapter {
     if (this.hf.getSheetNames().length <= 1) return
     this.hf.removeSheet(id)
     this.styleStore.removeSheet(id)
+    this.dimensionsStore.removeSheet(id)
     if (this.activeSheetId === id) {
       const fallbackName = this.hf.getSheetNames()[0]
       const fallbackId = this.hf.getSheetId(fallbackName)
@@ -213,6 +224,41 @@ export class EngineAdapter {
     this.pushMarker({ kind: 'merge', sheetId, before, after: this.styleStore.mergesFor(sheetId) })
   }
 
+  getRowHeight(row: number): number {
+    return this.dimensionsStore.getRowHeight(this.activeSheetId, row)
+  }
+
+  getColWidth(col: number): number {
+    return this.dimensionsStore.getColWidth(this.activeSheetId, col)
+  }
+
+  /** Highest row/col index with an explicit size override on the active sheet, or -1 if none. */
+  maxOverriddenRow(): number {
+    return this.dimensionsStore.maxOverriddenRow(this.activeSheetId)
+  }
+
+  maxOverriddenCol(): number {
+    return this.dimensionsStore.maxOverriddenCol(this.activeSheetId)
+  }
+
+  setRowHeight(row: number, height: number): void {
+    const sheetId = this.activeSheetId
+    const priorEffective = this.dimensionsStore.getRowHeight(sheetId, row)
+    const before = this.dimensionsStore.setRowHeight(sheetId, row, height)
+    const after = this.dimensionsStore.getRowHeight(sheetId, row)
+    if (priorEffective === after) return
+    this.pushMarker({ kind: 'dimension', sheetId, axis: 'row', index: row, before, after })
+  }
+
+  setColWidth(col: number, width: number): void {
+    const sheetId = this.activeSheetId
+    const priorEffective = this.dimensionsStore.getColWidth(sheetId, col)
+    const before = this.dimensionsStore.setColWidth(sheetId, col, width)
+    const after = this.dimensionsStore.getColWidth(sheetId, col)
+    if (priorEffective === after) return
+    this.pushMarker({ kind: 'dimension', sheetId, axis: 'col', index: col, before, after })
+  }
+
   getSheetDimensions(): { rows: number; cols: number } {
     const dims = this.hf.getSheetDimensions(this.activeSheetId)
     return { rows: dims.height, cols: dims.width }
@@ -237,11 +283,15 @@ export class EngineAdapter {
       })
       const styles = this.styleStore.serializeSheet(sheetId)
       const merges = this.styleStore.mergesFor(sheetId)
+      const rowHeights = this.dimensionsStore.serializeRowHeights(sheetId)
+      const colWidths = this.dimensionsStore.serializeColWidths(sheetId)
       return {
         name,
         cells,
         ...(styles.length > 0 && { styles }),
-        ...(merges.length > 0 && { merges })
+        ...(merges.length > 0 && { merges }),
+        ...(rowHeights.length > 0 && { rowHeights }),
+        ...(colWidths.length > 0 && { colWidths })
       }
     })
 
@@ -255,6 +305,7 @@ export class EngineAdapter {
   loadWorkbook(doc: SerializedWorkbook): void {
     this.hf = this.createEngine()
     this.styleStore = new StyleStore()
+    this.dimensionsStore = new DimensionsStore()
     this.undoStack = []
     this.redoStack = []
     const sheetsToLoad = doc.sheets.length > 0 ? doc.sheets : [{ name: 'Sheet1', cells: [] }]
@@ -276,6 +327,9 @@ export class EngineAdapter {
         }
         if (sheet.styles) this.styleStore.loadSheetStyles(sheetId, sheet.styles)
         if (sheet.merges) this.styleStore.setMerges(sheetId, sheet.merges)
+        if (sheet.rowHeights || sheet.colWidths) {
+          this.dimensionsStore.loadSheet(sheetId, sheet.rowHeights ?? [], sheet.colWidths ?? [])
+        }
       }
     })
 
@@ -307,7 +361,9 @@ export class EngineAdapter {
       return changes
     }
     if (marker.kind === 'style') this.styleStore.restore(marker.sheetId, marker.before)
-    else this.styleStore.setMerges(marker.sheetId, marker.before)
+    else if (marker.kind === 'merge') this.styleStore.setMerges(marker.sheetId, marker.before)
+    else if (marker.axis === 'row') this.dimensionsStore.restoreRowHeight(marker.sheetId, marker.index, marker.before)
+    else this.dimensionsStore.restoreColWidth(marker.sheetId, marker.index, marker.before)
     this.redoStack.push(marker)
     return []
   }
@@ -324,7 +380,9 @@ export class EngineAdapter {
       return changes
     }
     if (marker.kind === 'style') this.styleStore.restore(marker.sheetId, marker.after)
-    else this.styleStore.setMerges(marker.sheetId, marker.after)
+    else if (marker.kind === 'merge') this.styleStore.setMerges(marker.sheetId, marker.after)
+    else if (marker.axis === 'row') this.dimensionsStore.restoreRowHeight(marker.sheetId, marker.index, marker.after)
+    else this.dimensionsStore.restoreColWidth(marker.sheetId, marker.index, marker.after)
     this.undoStack.push(marker)
     return []
   }

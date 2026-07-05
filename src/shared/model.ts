@@ -48,14 +48,26 @@ export interface SerializedMerge {
   maxCol: number
 }
 
+export interface SerializedRowHeight {
+  row: number
+  height: number
+}
+
+export interface SerializedColWidth {
+  col: number
+  width: number
+}
+
 export interface SerializedSheet {
   name: string
   cells: SerializedCell[]
   // Optional and omitted when empty -- old .calco files without these keys
-  // load fine as unstyled/unmerged sheets (forward-tolerant reading, spec
-  // section 5).
+  // load fine as unstyled/unmerged/default-sized sheets (forward-tolerant
+  // reading, spec section 5).
   styles?: SerializedStyledCell[]
   merges?: SerializedMerge[]
+  rowHeights?: SerializedRowHeight[]
+  colWidths?: SerializedColWidth[]
 }
 
 export interface SerializedWorkbook {

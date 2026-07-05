@@ -411,6 +411,73 @@ describe('EngineAdapter', () => {
     })
   })
 
+  describe('row/column dimensions (spec section 6 -- "redimensionar")', () => {
+    it('defaults to the standard size and reflects an explicit override', () => {
+      const engine = new EngineAdapter()
+      const defaultHeight = engine.getRowHeight(0)
+      const defaultWidth = engine.getColWidth(0)
+      engine.setRowHeight(2, 40)
+      engine.setColWidth(3, 150)
+      expect(engine.getRowHeight(2)).toBe(40)
+      expect(engine.getColWidth(3)).toBe(150)
+      expect(engine.getRowHeight(0)).toBe(defaultHeight)
+      expect(engine.getColWidth(0)).toBe(defaultWidth)
+    })
+
+    it('keeps dimensions independent per sheet', () => {
+      const engine = new EngineAdapter()
+      const secondId = engine.addSheet('Sheet2')
+      engine.setColWidth(0, 200)
+      engine.setActiveSheetId(secondId)
+      expect(engine.getColWidth(0)).not.toBe(200)
+    })
+
+    it('maxOverriddenRow/Col track the highest resized index on the active sheet', () => {
+      const engine = new EngineAdapter()
+      expect(engine.maxOverriddenRow()).toBe(-1)
+      engine.setRowHeight(7, 40)
+      engine.setRowHeight(2, 30)
+      expect(engine.maxOverriddenRow()).toBe(7)
+    })
+
+    it('participates in the unified undo/redo history', () => {
+      const engine = new EngineAdapter()
+      engine.setColWidth(0, 200)
+      engine.undo()
+      expect(engine.getColWidth(0)).toBe(80)
+      engine.redo()
+      expect(engine.getColWidth(0)).toBe(200)
+    })
+
+    it('a no-op resize (same size) does not push an undo entry', () => {
+      const engine = new EngineAdapter()
+      const width = engine.getColWidth(0)
+      engine.setColWidth(0, width)
+      expect(engine.canUndo()).toBe(false)
+    })
+
+    it('persists overrides through serializeWorkbook / loadWorkbook', () => {
+      const engine = new EngineAdapter()
+      engine.setRowHeight(1, 40)
+      engine.setColWidth(2, 150)
+      const doc = engine.serializeWorkbook()
+      expect(doc.sheets[0].rowHeights).toEqual([{ row: 1, height: 40 }])
+      expect(doc.sheets[0].colWidths).toEqual([{ col: 2, width: 150 }])
+
+      const reloaded = new EngineAdapter()
+      reloaded.loadWorkbook(doc)
+      expect(reloaded.getRowHeight(1)).toBe(40)
+      expect(reloaded.getColWidth(2)).toBe(150)
+    })
+
+    it('omits rowHeights/colWidths keys for a sheet with no overrides', () => {
+      const engine = new EngineAdapter()
+      const doc = engine.serializeWorkbook()
+      expect(doc.sheets[0].rowHeights).toBeUndefined()
+      expect(doc.sheets[0].colWidths).toBeUndefined()
+    })
+  })
+
   describe('sheet management', () => {
     it('lists sheets and reflects add/rename', () => {
       const engine = new EngineAdapter()

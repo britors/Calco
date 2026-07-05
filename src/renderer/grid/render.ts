@@ -88,12 +88,12 @@ function drawBodyGridlines(rc: RenderContext, range: VisibleRange): void {
   ctx.beginPath()
 
   for (let row = range.startRow; row <= range.endRow + 1; row++) {
-    const y = Math.round(metrics.headerHeight + row * metrics.rowHeight - scroll.scrollTop) + 0.5
+    const y = Math.round(metrics.headerHeight + metrics.rowSizer.offsetOf(row) - scroll.scrollTop) + 0.5
     ctx.moveTo(metrics.headerWidth, y)
     ctx.lineTo(scroll.viewportWidth, y)
   }
   for (let col = range.startCol; col <= range.endCol + 1; col++) {
-    const x = Math.round(metrics.headerWidth + col * metrics.colWidth - scroll.scrollLeft) + 0.5
+    const x = Math.round(metrics.headerWidth + metrics.colSizer.offsetOf(col) - scroll.scrollLeft) + 0.5
     ctx.moveTo(x, metrics.headerHeight)
     ctx.lineTo(x, scroll.viewportHeight)
   }
@@ -334,9 +334,10 @@ function drawHeaders(rc: RenderContext, range: VisibleRange): void {
   ctx.clip()
   ctx.textAlign = 'center'
   for (let col = range.startCol; col <= range.endCol; col++) {
-    const x = metrics.headerWidth + col * metrics.colWidth - scroll.scrollLeft
+    const x = metrics.headerWidth + metrics.colSizer.offsetOf(col) - scroll.scrollLeft
+    const width = metrics.colSizer.sizeOf(col)
     ctx.fillStyle = col >= sel.minCol && col <= sel.maxCol ? COLORS.headerTextActive : COLORS.headerText
-    ctx.fillText(columnLabel(col), x + metrics.colWidth / 2, metrics.headerHeight / 2)
+    ctx.fillText(columnLabel(col), x + width / 2, metrics.headerHeight / 2)
   }
   ctx.restore()
 
@@ -346,9 +347,10 @@ function drawHeaders(rc: RenderContext, range: VisibleRange): void {
   ctx.clip()
   ctx.textAlign = 'right'
   for (let row = range.startRow; row <= range.endRow; row++) {
-    const y = metrics.headerHeight + row * metrics.rowHeight - scroll.scrollTop
+    const y = metrics.headerHeight + metrics.rowSizer.offsetOf(row) - scroll.scrollTop
+    const height = metrics.rowSizer.sizeOf(row)
     ctx.fillStyle = row >= sel.minRow && row <= sel.maxRow ? COLORS.headerTextActive : COLORS.headerText
-    ctx.fillText(String(row + 1), metrics.headerWidth - 6, y + metrics.rowHeight / 2)
+    ctx.fillText(String(row + 1), metrics.headerWidth - 6, y + height / 2)
   }
   ctx.restore()
 
