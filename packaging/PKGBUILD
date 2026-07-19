@@ -1,0 +1,25 @@
+pkgname=calco
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Editor de planilhas nativo em Rust e GTK4'
+arch=('x86_64' 'aarch64')
+url='https://github.com/britors/Calco'
+license=('GPL-3.0-only')
+depends=('gtk4')
+makedepends=('cargo')
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  cargo build --release --locked
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/calco "$pkgdir/usr/bin/calco"
+  install -Dm644 data/br.com.w3ti.Calco.desktop "$pkgdir/usr/share/applications/br.com.w3ti.Calco.desktop"
+  install -Dm644 data/br.com.w3ti.Calco.metainfo.xml "$pkgdir/usr/share/metainfo/br.com.w3ti.Calco.metainfo.xml"
+  install -Dm644 data/application-x-calco.xml "$pkgdir/usr/share/mime/packages/application-x-calco.xml"
+  install -Dm644 design/calco-icon-mark.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/br.com.w3ti.Calco.svg"
+}

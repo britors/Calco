@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>br.com.w3ti.Calco</id>
+  <name>Calco</name>
+  <summary>Editor de planilhas nativo em Rust e GTK4</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <description>
+    <p>Calco é um editor de planilhas desktop nativo construído com Rust e GTK4. Crie e edite documentos, trabalhe com múltiplas abas, fórmulas e formatação, ou importe e exporte arquivos CSV e XLSX.</p>
+  </description>
+  <url type="homepage">https://github.com/britors/Calco</url>
+  <developer id="br.com.w3ti"><name>W3TI</name></developer>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.0.0" date="2026-07-19"/>
+  </releases>
+  <launchable type="desktop-id">br.com.w3ti.Calco.desktop</launchable>
+  <provides><binary>calco</binary></provides>
+</component>

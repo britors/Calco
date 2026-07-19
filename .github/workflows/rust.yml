@@ -1,0 +1,49 @@
+name: Rust GTK
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y libgtk-4-dev desktop-file-utils appstream
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - run: desktop-file-validate data/br.com.w3ti.Calco.desktop
+      - run: appstreamcli validate --no-net data/br.com.w3ti.Calco.metainfo.xml
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: brew install gtk4
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+
+  windows:
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-rust
+            mingw-w64-x86_64-gtk4
+            mingw-w64-x86_64-pkgconf
+      - run: cargo test --locked
+      - run: cargo build --release --locked

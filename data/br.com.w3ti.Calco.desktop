@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Calco
+Comment=Editor de planilhas nativo
+Exec=calco %F
+Icon=br.com.w3ti.Calco
+Terminal=false
+Type=Application
+Categories=Office;Spreadsheet;
+MimeType=application/x-calco;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;text/csv;
+StartupNotify=true
