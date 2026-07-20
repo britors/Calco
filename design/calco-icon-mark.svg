@@ -27,8 +27,6 @@
     </filter>
   </defs>
 
-  <rect x="0" y="0" width="600" height="600" fill="#0f1117"/>
-
   <!-- Same glyph as the full logo, without the wordmark: recentered and
        enlarged to read clearly at small taskbar/favicon sizes. -->
   <g transform="translate(300,300) scale(1.42) translate(-334,-234)">
